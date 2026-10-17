@@ -58,6 +58,8 @@ export const Sidebar = ({
   onSelect,
   role,
   mode = "retail",
+  modes = ["retail"],
+  onModeChange,
   open,
   onClose,
   expiryCount,
@@ -68,8 +70,11 @@ export const Sidebar = ({
   active: ScreenKey;
   onSelect: (key: ScreenKey) => void;
   role: "admin" | "staff";
-  /** Dashboard shown under the brand name */
+  /** Active billing mode */
   mode?: Mode;
+  /** Billing modes this user may open — only these are offered */
+  modes?: Mode[];
+  onModeChange?: (mode: Mode) => void;
   open: boolean;
   onClose: () => void;
   expiryCount: number;
@@ -133,9 +138,46 @@ export const Sidebar = ({
                 )}
               </p>
               <p className="mt-1 text-[7.5px] font-bold uppercase tracking-[0.12em] text-gray-500">
-                {MODE_LABEL[mode]}
+                Pharmacy Management System
               </p>
             </div>
+          </div>
+        </div>
+
+        {/* Billing mode — only the modes this user is permitted are offered */}
+        <div className="px-3 pb-2">
+          <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/40">
+            Billing Mode
+          </p>
+          <div
+            role="radiogroup"
+            aria-label="Billing mode"
+            className={`grid gap-1 rounded-lg bg-white/[0.06] p-1 ${modes.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}
+          >
+            {modes.map((m) => {
+              const isActive = m === mode;
+              return (
+                <button
+                  key={m}
+                  role="radio"
+                  aria-checked={isActive}
+                  aria-label={MODE_LABEL[m]}
+                  onClick={() => onModeChange?.(m)}
+                  className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 py-2 text-[12.5px] font-semibold transition ${
+                    isActive
+                      ? "bg-[var(--c-primary)] text-white shadow-sm"
+                      : "text-white/70 hover:bg-white/[0.07] hover:text-white"
+                  }`}
+                >
+                  {m === "retail" ? (
+                    <ShoppingCart className="h-3.5 w-3.5" />
+                  ) : (
+                    <Truck className="h-3.5 w-3.5" />
+                  )}
+                  {m === "retail" ? "Retail" : "Wholesale"}
+                </button>
+              );
+            })}
           </div>
         </div>
 

@@ -65,10 +65,11 @@ One login page, two roles — **Admin** and **Staff**. Retail and Wholesale are 
 inside the app, not roles or separate logins.
 
 1. Everyone signs in on the same login page with their own passcode.
-2. Admins open both dashboards; each staff account is given Retail, Wholesale or both.
-3. Users with both pick a dashboard after login and switch from the user menu (top right)
-   without signing in again. Users with one dashboard go straight into it. The chosen
-   dashboard survives a refresh.
+2. The app opens directly — there is no separate dashboard-selection screen.
+3. The **Billing Mode** selector at the top of the sidebar switches between Retail and
+   Wholesale without signing in again, staying on the same screen. It offers only the modes
+   the user is permitted: admins get both; each staff account is given Retail, Wholesale or
+   both. The chosen mode survives a refresh.
 
 - **Admin** — both dashboards, all screens, user management (Settings → Users & Access),
   shared catalogue and shop details, per-dashboard settings, reconciliation.
@@ -145,7 +146,7 @@ hold the old values, so they don't print on new invoices.
 
 ```
 app/
-  pos/admin/secure/control-panel/nalam-care-medicals/page.tsx   app shell (login, dashboard picker, screens)
+  pos/admin/secure/control-panel/nalam-care-medicals/page.tsx   app shell (login, billing mode, screens)
   api/*/route.ts            mode-scoped JSON for the screens
   invoice/[id]/             printable bill
 components/pms/             one component per screen (+ WholesaleBilling, Suppliers, Payments)

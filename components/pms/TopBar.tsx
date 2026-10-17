@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Search, CalendarDays, User, ChevronDown, Menu, LogOut, RotateCw, ArrowLeftRight } from "lucide-react";
+import { Search, CalendarDays, User, ChevronDown, Menu, LogOut, RotateCw } from "lucide-react";
 import { dateLong, timeLabel } from "@/lib/format";
-import { MODE_LABEL, type Mode } from "@/lib/mode";
+import type { Mode } from "@/lib/mode";
 
 /* A ticking clock is an external source of truth, so it is subscribed to
    rather than pushed into state from an effect. The snapshot is bucketed to
@@ -24,7 +24,6 @@ export const TopBar = ({
   role,
   name,
   mode = "retail",
-  onSwitchMode,
   onLogout,
   onRefresh,
   searchRef,
@@ -37,8 +36,6 @@ export const TopBar = ({
   /** Signed-in user's name (user accounts); falls back to "Pharmacist". */
   name?: string;
   mode?: Mode;
-  /** Present only when the user may open the other dashboard. */
-  onSwitchMode?: () => void;
   onLogout: () => void;
   onRefresh: () => void;
   searchRef?: React.RefObject<HTMLInputElement | null>;
@@ -116,7 +113,7 @@ export const TopBar = ({
         </button>
 
         {menuOpen && (
-          <div className="absolute right-0 top-full z-30 mt-2 w-60 overflow-hidden rounded-xl border border-[#e9ecef] bg-white py-1 shadow-lg">
+          <div className="absolute right-0 top-full z-30 mt-2 w-52 overflow-hidden rounded-xl border border-[#e9ecef] bg-white py-1 shadow-lg">
             <button
               onClick={() => {
                 setMenuOpen(false);
@@ -126,18 +123,6 @@ export const TopBar = ({
             >
               <RotateCw className="h-4 w-4 text-gray-500" /> Refresh data
             </button>
-            {onSwitchMode && (
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  onSwitchMode();
-                }}
-                className="flex w-full cursor-pointer items-center gap-2.5 px-4 py-2.5 text-left text-[13px] text-gray-700 transition hover:bg-gray-50"
-              >
-                <ArrowLeftRight className="h-4 w-4 text-gray-500" /> Switch to{" "}
-                {MODE_LABEL[mode === "retail" ? "wholesale" : "retail"]}
-              </button>
-            )}
             <button
               onClick={() => {
                 setMenuOpen(false);

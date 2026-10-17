@@ -18,7 +18,7 @@ import {
 import { ModeProvider, TOAST_EVENT } from "@/components/pms/mode-context";
 import { Sidebar, type ScreenKey } from "@/components/pms/Sidebar";
 import { TopBar } from "@/components/pms/TopBar";
-import { Login, DashboardPicker } from "@/components/pms/Login";
+import { Login } from "@/components/pms/Login";
 import { Dashboard } from "@/components/pms/Dashboard";
 import { Billing } from "@/components/pms/Billing";
 import { WholesaleBilling } from "@/components/pms/WholesaleBilling";
@@ -46,14 +46,23 @@ const readStoredMode = (): Mode | null => {
   }
 };
 
+/** The billing mode to open: the last one used if still permitted, else the first permitted one. */
+const startingMode = (info: SessionInfo): Mode => {
+  const saved = readStoredMode();
+  return saved && info.modes.includes(saved) ? saved : info.modes[0];
+};
+
 export default function PharmacyManagementSystem() {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [mode, setMode] = useState<Mode | null>(null);
+  /* Kept here so switching billing mode stays on the same screen. */
+  const [screen, setScreen] = useState<ScreenKey>("billing");
   const [checking, setChecking] = useState(true);
 
   /* ------------------------------- session -------------------------------
      The signed cookie is the source of truth; the server tells us the role
-     and which dashboards it opens. The chosen dashboard survives a refresh. */
+     and which billing modes it opens. After login the app opens directly in
+     the last-used (or first permitted) mode; the sidebar selector switches it. */
   useEffect(() => {
     let cancelled = false;
     currentSession()
@@ -62,8 +71,7 @@ export default function PharmacyManagementSystem() {
         startTransition(() => {
           if (info) {
             setSession(info);
-            const saved = readStoredMode();
-            setMode(saved && info.modes.includes(saved) ? saved : info.modes.length === 1 ? info.modes[0] : null);
+            setMode(startingMode(info));
           }
           setChecking(false);
         });
@@ -90,8 +98,8 @@ export default function PharmacyManagementSystem() {
     } catch {
       /* ignore */
     }
-    if (info.modes.length === 1) chooseMode(info.modes[0]);
-    else setMode(null);
+    setScreen("billing");
+    chooseMode(startingMode(info));
   };
 
   const logout = async () => {
@@ -106,33 +114,27 @@ export default function PharmacyManagementSystem() {
     }
   };
 
-  /* The server refused this dashboard (access changed or session ended):
-     re-read the session and fall back to the picker or the login page. */
+  /* The server refused this billing mode (access changed or session ended):
+     re-read the session and move to a permitted mode, or back to login. */
   const recheckSession = async () => {
     const info = await currentSession().catch(() => null);
     if (!info) return logout();
     setSession(info);
-    if (mode && !info.modes.includes(mode)) {
-      setMode(info.modes.length === 1 ? info.modes[0] : null);
-      try {
-        window.sessionStorage.removeItem(MODE_KEY);
-      } catch {
-        /* ignore */
-      }
-    }
+    if (mode && !info.modes.includes(mode)) chooseMode(info.modes[0]);
   };
 
   if (checking) return <LoadingScreen />;
-  if (!session) return <Login onSuccess={login} />;
-  if (!mode) return <DashboardPicker modes={session.modes} onPick={chooseMode} onLogout={logout} />;
+  if (!session || !mode) return <Login onSuccess={login} />;
 
   return (
     <ModeProvider value={{ mode, role: session.role, modes: session.modes }}>
-      {/* Keyed by mode so switching dashboards starts every screen fresh. */}
+      {/* Keyed by mode so each mode's screens start with that mode's data. */}
       <Workspace
         key={mode}
         mode={mode}
         session={session}
+        screen={screen}
+        onScreen={setScreen}
         onSwitchMode={chooseMode}
         onLogout={logout}
         onAccessDenied={recheckSession}
@@ -150,18 +152,21 @@ const LoadingScreen = () => (
 function Workspace({
   mode,
   session,
+  screen,
+  onScreen: setScreen,
   onSwitchMode,
   onLogout,
   onAccessDenied,
 }: {
   mode: Mode;
   session: SessionInfo;
+  screen: ScreenKey;
+  onScreen: (screen: ScreenKey) => void;
   onSwitchMode: (mode: Mode) => void;
   onLogout: () => void;
   onAccessDenied: () => void;
 }) {
   const role = session.role;
-  const [screen, setScreen] = useState<ScreenKey>("billing");
   const [expiryTab, setExpiryTab] = useState<"expired" | "soon" | "low">("soon");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -239,10 +244,6 @@ function Workspace({
     setBillingSearch(query);
   };
 
-  if (isDataLoading) return <LoadingScreen />;
-
-  const otherMode: Mode = mode === "retail" ? "wholesale" : "retail";
-
   return (
     <div className="flex h-screen overflow-hidden bg-[#f7f8fa]">
       <ThemeApplier theme={settings?.colour_theme} />
@@ -254,6 +255,12 @@ function Workspace({
         }}
         role={role}
         mode={mode}
+        modes={session.modes}
+        onModeChange={(next) => {
+          if (next === mode) return;
+          onSwitchMode(next);
+          setSidebarOpen(false);
+        }}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         expiryCount={expiryCount}
@@ -275,13 +282,19 @@ function Workspace({
           role={role}
           name={session.name}
           mode={mode}
-          onSwitchMode={session.modes.includes(otherMode) ? () => onSwitchMode(otherMode) : undefined}
           onLogout={onLogout}
           onRefresh={() => notify("Data refreshed.")}
           searchRef={searchRef}
         />
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-5">
+          {isDataLoading ? (
+            /* Shown inside the layout while this billing mode's data loads. */
+            <p className="animate-pulse py-24 text-center text-[12px] font-bold uppercase tracking-[0.2em] text-gray-400">
+              Loading…
+            </p>
+          ) : (
+          <>
           {screen === "dashboard" && (
             <Dashboard
               medicines={medicines}
@@ -363,6 +376,8 @@ function Workspace({
 
           {screen === "settings" && role === "admin" && (
             <SettingsPanel settings={settings} suppliers={suppliers} medicines={medicines} onChanged={notify} />
+          )}
+          </>
           )}
         </main>
       </div>
