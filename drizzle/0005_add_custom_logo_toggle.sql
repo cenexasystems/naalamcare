@@ -1,0 +1,1 @@
+ALTER TABLE "settings" ADD COLUMN "use_custom_logo" boolean DEFAULT false NOT NULL;

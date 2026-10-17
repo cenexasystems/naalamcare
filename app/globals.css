@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+:root {
+  /* Theme tokens — declared first, and overwritten at runtime by ThemeApplier
+     when the owner picks a different theme in Settings. Defaults match the
+     Nalam Care Medicals logo blue. Everything below references these, never the reverse. */
+  --c-primary: #1d3faf;
+  --c-deep: #021c8b;
+  --c-hover: #0f2c9c;
+  --c-mint: #e8ecfa;
+
+  /* Palette sampled from the client mockups */
+  --brand-sidebar: #1a1d21;
+  --brand-sidebar-2: #24282d;
+  --brand-green: var(--c-primary);
+  --brand-deep: var(--c-deep);
+  --brand-ink: #0b2b27;
+  --surface: #f7f8fa;
+  --line: #e5e7eb;
+  --primary: var(--c-primary);
+  --secondary: var(--c-deep);
+}
+
+@theme {
+  --color-brand-sidebar: #1a1d21;
+  --color-brand-green: var(--c-primary);
+  --color-brand-deep: var(--c-deep);
+  --color-brand-mint: var(--c-mint);
+  --color-surface: #f7f8fa;
+  --color-line: #e5e7eb;
+  --color-primary: var(--c-primary);
+  --color-secondary: var(--c-deep);
+}
+
+body {
+  font-family: var(--font-poppins), system-ui, -apple-system, "Segoe UI", sans-serif;
+  background-color: var(--surface);
+  color: #111827;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #c9d1d6;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--brand-green);
+}
+
+/* Hide number input spin buttons */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+@layer components {
+  .field {
+    @apply w-full rounded-lg border border-[#d8dde3] bg-white px-3 py-2.5 text-sm text-gray-900
+           outline-none transition placeholder:text-gray-400
+           focus:border-[var(--c-primary)]
+           focus:ring-2 focus:ring-[color-mix(in_srgb,var(--c-primary)_15%,transparent)];
+  }
+  .field-label {
+    @apply mb-1.5 block text-[13px] font-medium text-gray-700;
+  }
+  .card {
+    @apply rounded-xl border border-[#e5e7eb] bg-white;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--c-deep)] px-5 py-2.5
+           text-sm font-semibold text-white transition hover:bg-[var(--c-hover)]
+           disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-[#d8dde3] bg-white
+           px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50;
+  }
+}
+
+/* Table cells live in the components layer so per-column utilities such as
+   `text-right` / `text-center` on a <th> still win over the default alignment. */
+@layer components {
+  .th {
+    @apply px-2.5 py-3 text-left text-[11.5px] font-semibold uppercase tracking-wide text-gray-600;
+  }
+  .td {
+    @apply px-2.5 py-3 text-[13px] text-gray-800;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

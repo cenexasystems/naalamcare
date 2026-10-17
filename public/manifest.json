@@ -1,0 +1,25 @@
+{
+  "name": "Nalam Care Medicals",
+  "short_name": "Nalam Care",
+  "description": "Nalam Care Medicals — Retail & Wholesale Billing, Inventory and Pharmacy Management",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#021c8b",
+  "orientation": "any",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "302x300",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logos/nalam-care-medicals-logo.png",
+      "sizes": "302x300",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
