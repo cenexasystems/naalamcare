@@ -207,6 +207,15 @@ export const mapModeSettings = (row: any, mode: Mode): ModeSettings => ({
     .sort((a, b) => a.min_packs - b.min_packs),
   enforce_moq: Boolean(row?.enforceMoq ?? mode === "wholesale"),
   invoice_terms: row?.invoiceTerms ?? "",
+  gstin: row?.gstin ?? "",
+  dl_no: row?.dlNo ?? "",
+  shop_name: row?.shopName ?? "",
+  full_name: row?.fullName ?? "",
+  address: row?.address ?? "",
+  phone: row?.phone ?? "",
+  shop_contact_number: row?.shopContactNumber ?? "",
+  email: row?.email ?? "",
+  default_gst: row?.defaultGst != null ? toNum(row.defaultGst) : 12,
 });
 
 export const mapPayment = (row: any): Payment => ({

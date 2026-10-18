@@ -612,30 +612,47 @@ export async function deleteCustomer(mode: Mode, id: string): Promise<ActionResu
    Settings
    ========================================================================== */
 
-/** Shop details are shared by both dashboards (one business, one GSTIN). */
+/**
+ * Settings → Shop Details. Shop identity, GSTIN / drug licence and the stock &
+ * tax defaults belong to the current billing mode (retail and wholesale each
+ * print their own); logo, colour theme and Instagram are shared.
+ */
 export async function saveSettings(mode: Mode, payload: any): Promise<ActionResult<null>> {
   return run(async () => {
     await requireMode(mode, { admin: true });
-    await db
-      .update(schema.settings)
-      .set({
-        shopName: payload.shop_name || "",
-        fullName: payload.full_name || "",
-        address: payload.address || "",
-        phone: payload.phone || "",
-        shopContactNumber: payload.shop_contact_number || "",
-        email: payload.email || "",
-        gstin: payload.gstin || "",
-        dlNo: payload.dl_no || "",
-        colourTheme: payload.colour_theme || "green",
-        logo: payload.logo || "",
-        useCustomLogo: Boolean(payload.use_custom_logo),
-        instagramId: payload.instagram_id || "",
-        defaultGst: String(payload.default_gst ?? 12),
-        lowStockThreshold: Number(payload.low_stock_threshold ?? 20),
-        expiryAlertMonths: Number(payload.expiry_alert_months ?? 6),
-      })
-      .where(eq(schema.settings.id, 1));
+    const gstin = str(payload.gstin).toUpperCase().replace(/\s/g, "");
+    if (gstin && !/^[0-9A-Z]{15}$/.test(gstin)) fail("GSTIN must be 15 letters and numbers.");
+    const gst = num(payload.default_gst ?? 12);
+    if (gst < 0 || gst > 28) fail("Default GST % must be between 0 and 28.");
+
+    const modeValues = {
+      shopName: str(payload.shop_name),
+      fullName: str(payload.full_name),
+      address: str(payload.address),
+      phone: str(payload.phone),
+      shopContactNumber: str(payload.shop_contact_number),
+      email: str(payload.email),
+      gstin,
+      dlNo: str(payload.dl_no).toUpperCase().slice(0, 60),
+      defaultGst: String(gst),
+      lowStockThreshold: Math.max(0, int(payload.low_stock_threshold ?? 20)),
+      expiryAlertMonths: Math.max(0, int(payload.expiry_alert_months ?? 6)),
+    };
+    await db.transaction(async (tx) => {
+      await tx
+        .update(schema.settings)
+        .set({
+          colourTheme: payload.colour_theme || "nalam",
+          logo: payload.logo || "",
+          useCustomLogo: Boolean(payload.use_custom_logo),
+          instagramId: payload.instagram_id || "",
+        })
+        .where(eq(schema.settings.id, 1));
+      await tx
+        .insert(schema.modeSettings)
+        .values({ mode, ...modeValues })
+        .onConflictDoUpdate({ target: schema.modeSettings.mode, set: modeValues });
+    });
     return null;
   });
 }
@@ -669,8 +686,6 @@ export async function saveModeSettings(mode: Mode, payload: any): Promise<Action
       paymentMethods: finalMethods.join(","),
       allowCredit,
       defaultCreditDays: Math.max(0, int(payload.default_credit_days)),
-      lowStockThreshold: Math.max(0, int(payload.low_stock_threshold)),
-      expiryAlertMonths: Math.max(0, int(payload.expiry_alert_months)),
       maxDiscountPercent: String(Math.min(100, Math.max(0, round2(num(payload.max_discount_percent))))),
       bulkDiscountTiers: JSON.stringify(tiers),
       enforceMoq: Boolean(payload.enforce_moq),

@@ -28,13 +28,17 @@ export const SettingsPanel = ({
 }) => {
   const mode = useMode();
   const isAdmin = useModeState()?.role === "admin";
-  const [settings, setSettings] = useState<ShopSettings | null>(initialSettings);
+  /* The low-stock field edits this mode's alert level for every medicine
+     (0 = each medicine's own), so show the mode's raw value, not the merged one. */
+  const toForm = (s: ScopedSettings | null): ShopSettings | null =>
+    s && { ...s, low_stock_threshold: s.mode_settings.low_stock_threshold };
+  const [settings, setSettings] = useState<ShopSettings | null>(() => toForm(initialSettings));
   const [supplierDraft, setSupplierDraft] = useState<Supplier | null>(null);
   const [addingSupplier, setAddingSupplier] = useState(false);
 
   /* Re-sync when the server row changes after a save, otherwise the panel
      keeps showing the pre-save draft. */
-  useEffect(() => setSettings(initialSettings), [initialSettings]);
+  useEffect(() => setSettings(toForm(initialSettings)), [initialSettings]);
 
   const set = (patch: Partial<ShopSettings>) => settings && setSettings({ ...settings, ...patch });
 
@@ -80,15 +84,18 @@ export const SettingsPanel = ({
     <div>
       <PageTitle
         title={mode === "wholesale" ? "Wholesale Settings" : "Settings"}
-        subtitle="Shop details are shared; invoice numbering, payments, pricing and alerts are set per dashboard"
+        subtitle="Shop details, GSTIN, licence, invoicing, payments, pricing and alerts are set separately for retail and wholesale"
       />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {/* Shop details */}
         <Card className="p-5">
-          <h3 className="mb-1 text-[15px] font-bold text-gray-900">Shop Details</h3>
+          <h3 className="mb-1 text-[15px] font-bold text-gray-900">
+            {mode === "wholesale" ? "Wholesale" : "Retail"} Shop Details
+          </h3>
           <p className="mb-4 text-[12px] text-gray-500">
-            These details print on every tax invoice. Leave a field blank and it stays off the bill.
+            These details print on every {mode} tax invoice; the other billing mode keeps its own. Leave a field
+            blank and it stays off the bill.
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Owner / Full Name">
@@ -137,7 +144,7 @@ export const SettingsPanel = ({
             <Field label="GSTIN" hint="Printed top-right on the invoice">
               <TextInput
                 value={settings?.gstin ?? ""}
-                onChange={(e) => set({ gstin: e.target.value.toUpperCase() })}
+                onChange={(e) => set({ gstin: e.target.value.toUpperCase().replace(/\s/g, "").slice(0, 15) })}
                 placeholder="Leave blank until confirmed"
               />
             </Field>
@@ -148,7 +155,7 @@ export const SettingsPanel = ({
                 placeholder="Leave blank until confirmed"
               />
             </Field>
-            <Field label="Instagram ID" className="sm:col-span-2">
+            <Field label="Instagram ID" className="sm:col-span-2" hint="Shared by retail and wholesale">
               <TextInput
                 value={settings?.instagram_id ?? ""}
                 onChange={(e) => set({ instagram_id: e.target.value })}
@@ -157,7 +164,9 @@ export const SettingsPanel = ({
             </Field>
           </div>
 
-          <h3 className="mb-4 mt-6 text-[15px] font-bold text-gray-900">Appearance</h3>
+          <h3 className="mb-4 mt-6 text-[15px] font-bold text-gray-900">
+            Appearance <span className="text-[12px] font-medium text-gray-500">— shared by retail and wholesale</span>
+          </h3>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field
               label="Colour Theme"
@@ -256,7 +265,9 @@ export const SettingsPanel = ({
             </Field>
           </div>
 
-          <h3 className="mb-4 mt-6 text-[15px] font-bold text-gray-900">Defaults</h3>
+          <h3 className="mb-4 mt-6 text-[15px] font-bold text-gray-900">
+            Defaults <span className="text-[12px] font-medium text-gray-500">— {mode} only</span>
+          </h3>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Field label="Default GST %" hint="GST is included in MRP and selling price">
               <TextInput
@@ -265,7 +276,7 @@ export const SettingsPanel = ({
                 onChange={(e) => set({ default_gst: Number(e.target.value) || 0 })}
               />
             </Field>
-            <Field label="Low stock threshold">
+            <Field label="Low stock threshold" hint="Alert level for every medicine here. 0 = each medicine's own">
               <TextInput
                 type="number"
                 value={settings?.low_stock_threshold}

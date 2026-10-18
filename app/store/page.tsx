@@ -1,5 +1,5 @@
 import { MapPin, Clock, Phone, Mail } from "lucide-react";
-import { getSettings } from "@/lib/db/queries";
+import { applyModeShopDetails, getModeSettings, getSettings } from "@/lib/db/queries";
 import { APP_NAME } from "@/lib/mode";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +7,10 @@ export const dynamic = "force-dynamic";
 /* Public store page. Every detail comes from Settings → Shop Details, so
    nothing is shown until the owner has filled it in. */
 export default async function Home() {
-  const shop = await getSettings().catch(() => null);
+  // The public page shows the retail counter's details.
+  const shop = await Promise.all([getSettings(), getModeSettings("retail")])
+    .then(([s, ms]) => (s ? applyModeShopDetails(s, ms) : null))
+    .catch(() => null);
   const name = shop?.shop_name || APP_NAME;
   const phones = [shop?.phone, shop?.shop_contact_number].filter(Boolean);
 

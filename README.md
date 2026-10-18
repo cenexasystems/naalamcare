@@ -52,10 +52,16 @@ can't be billed and Inventory shows a reminder.
 | Expiry Alert | Expired / expiring / low stock | Same |
 | Settings | Shop details (shared), retail settings, suppliers, reconciliation | Shop details (shared), wholesale settings |
 
-**Dashboard settings** (per mode): invoice number prefix (retail defaults to plain numbers,
-wholesale to `W1`, `W2`…), payment methods, credit sales and default credit days, low-stock
-threshold, expiry-alert months, cap on manual discount, quantity-discount tiers and minimum
-order enforcement (wholesale), invoice terms.
+**Settings per mode** — retail and wholesale each have their own:
+
+- **Shop details printed on invoices:** shop name, owner, address, phone, contact number, email,
+  **GSTIN** and **drug licence number** (Settings → Retail / Wholesale Shop Details).
+- **Stock & tax defaults:** default GST %, low-stock alert level, expiry-alert months.
+- **Billing:** invoice number prefix (retail defaults to plain numbers, wholesale to `W1`,
+  `W2`…), payment methods, credit sales and default credit days, cap on manual discount,
+  quantity-discount tiers and minimum order enforcement (wholesale), invoice terms.
+
+Logo, colour theme and Instagram ID are shared.
 
 Customer IDs: `NCM000001` (retail), `NCW000001` (wholesale). Older `AKP…` IDs are kept.
 

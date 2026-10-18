@@ -311,6 +311,17 @@ export type ModeSettings = {
   bulk_discount_tiers: DiscountTier[];
   enforce_moq: boolean;
   invoice_terms: string;
+  /** This mode's GSTIN and drug licence number, printed on its invoices */
+  gstin: string;
+  dl_no: string;
+  /** This mode's shop identity, printed on its invoices (blank = shop-wide value) */
+  shop_name: string;
+  full_name: string;
+  address: string;
+  phone: string;
+  shop_contact_number: string;
+  email: string;
+  default_gst: number;
 };
 
 /** Shop settings as seen from one dashboard: shared shop details + that mode's settings. */

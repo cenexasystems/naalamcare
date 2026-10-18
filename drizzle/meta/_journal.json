@@ -71,6 +71,20 @@
       "when": 1790595000000,
       "tag": "0009_app_users",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790596000000,
+      "tag": "0010_mode_gstin_dl",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790597000000,
+      "tag": "0011_mode_shop_details",
+      "breakpoints": true
     }
   ]
 }

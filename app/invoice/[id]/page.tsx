@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getBill, getModeSettings, getSettings } from "@/lib/db/queries";
+import { applyModeShopDetails, getBill, getModeSettings, getSettings } from "@/lib/db/queries";
 import { getSession } from "@/lib/auth";
 import { APP_NAME } from "@/lib/mode";
 import { amount, amountInWords, dateSlash, monthShort, money } from "@/lib/format";
@@ -69,8 +69,10 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   // Invoices are business records: only a signed-in user with access to the
   // bill's dashboard may open one. Anything else reads as "not found".
   const bill = found && found.mode && session?.modes.includes(found.mode) ? found : null;
-  const shop = await getSettings();
   const modeSettings = bill?.mode ? await getModeSettings(bill.mode) : null;
+  // Retail and wholesale each print their own shop name, address, phones, GSTIN and licence.
+  const shopWide = await getSettings();
+  const shop = shopWide && modeSettings ? applyModeShopDetails(shopWide, modeSettings) : shopWide;
   const wholesale = bill?.mode === "wholesale";
   const terms = (modeSettings?.invoice_terms || "")
     .split("\n")

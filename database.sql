@@ -414,3 +414,39 @@ CREATE TABLE IF NOT EXISTS "app_users" (
 	CONSTRAINT "app_users_passcode_hash_unique" UNIQUE("passcode_hash"),
 	CONSTRAINT "app_users_role_check" CHECK ("role" IN ('admin', 'staff'))
 );
+
+-- ---------------------------------------------------------------------------
+-- 6. Separate GSTIN and drug licence number for Retail and Wholesale
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "gstin" text DEFAULT '' NOT NULL;
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "dl_no" text DEFAULT '' NOT NULL;
+UPDATE "mode_settings" m SET "gstin" = s."gstin"
+FROM "settings" s WHERE s."id" = 1 AND m."gstin" = '' AND s."gstin" <> '';
+UPDATE "mode_settings" m SET "dl_no" = s."dl_no"
+FROM "settings" s WHERE s."id" = 1 AND m."dl_no" = '' AND s."dl_no" <> '';
+
+-- ---------------------------------------------------------------------------
+-- 7. Separate shop identity and stock & tax defaults for Retail and Wholesale
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "shop_name" text DEFAULT '' NOT NULL;
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "full_name" text DEFAULT '' NOT NULL;
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "address" text DEFAULT '' NOT NULL;
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "phone" text DEFAULT '' NOT NULL;
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "shop_contact_number" text DEFAULT '' NOT NULL;
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "email" text DEFAULT '' NOT NULL;
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "default_gst" numeric(5, 2) DEFAULT '12' NOT NULL;
+
+-- First run only (a mode with no shop name yet): start from the shop-wide details.
+UPDATE "mode_settings" m SET
+  "shop_name" = s."shop_name",
+  "full_name" = s."full_name",
+  "address" = s."address",
+  "phone" = s."phone",
+  "shop_contact_number" = s."shop_contact_number",
+  "email" = s."email",
+  "default_gst" = s."default_gst",
+  "expiry_alert_months" = CASE WHEN m."expiry_alert_months" = 0 THEN s."expiry_alert_months" ELSE m."expiry_alert_months" END
+FROM "settings" s
+WHERE s."id" = 1 AND m."shop_name" = '';

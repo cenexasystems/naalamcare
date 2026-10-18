@@ -256,6 +256,18 @@ export const modeSettings = pgTable("mode_settings", {
   enforceMoq: boolean("enforce_moq").notNull().default(false),
   /** Printed under "Terms & Conditions" on this mode's invoices; one per line. */
   invoiceTerms: text("invoice_terms").notNull().default(""),
+  /** GSTIN and drug licence number printed on this mode's invoices. */
+  gstin: text("gstin").notNull().default(""),
+  dlNo: text("dl_no").notNull().default(""),
+  /* Shop identity printed on this mode's invoices (blank = shop-wide value). */
+  shopName: text("shop_name").notNull().default(""),
+  fullName: text("full_name").notNull().default(""),
+  address: text("address").notNull().default(""),
+  phone: text("phone").notNull().default(""),
+  shopContactNumber: text("shop_contact_number").notNull().default(""),
+  email: text("email").notNull().default(""),
+  /** Default GST % for new purchases in this mode. */
+  defaultGst: numeric("default_gst", { precision: 5, scale: 2 }).notNull().default("12"),
 });
 
 /* --------------------------------------------------------------------------

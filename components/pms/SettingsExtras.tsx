@@ -16,8 +16,6 @@ type Draft = {
   payment_methods: PaymentMethod[];
   allow_credit: boolean;
   default_credit_days: string;
-  low_stock_threshold: string;
-  expiry_alert_months: string;
   max_discount_percent: string;
   enforce_moq: boolean;
   invoice_terms: string;
@@ -41,8 +39,6 @@ export const ModeSettingsCard = ({
     payment_methods: settings.payment_methods.filter((m) => m !== "Credit"),
     allow_credit: settings.allow_credit,
     default_credit_days: String(settings.default_credit_days || ""),
-    low_stock_threshold: String(settings.low_stock_threshold || ""),
-    expiry_alert_months: String(settings.expiry_alert_months || ""),
     max_discount_percent: String(settings.max_discount_percent || ""),
     enforce_moq: settings.enforce_moq,
     invoice_terms: settings.invoice_terms,
@@ -75,10 +71,11 @@ export const ModeSettingsCard = ({
     <Card className="mt-4 p-5">
       <h3 className="mb-1 text-[15px] font-bold text-gray-900">{MODE_LABEL[mode]} Settings</h3>
       <p className="mb-4 text-[12px] text-gray-500">
-        These apply to the {mode} dashboard only. The other dashboard keeps its own.
+        These apply to the {mode} dashboard only. The other dashboard keeps its own. Shop details, GSTIN,
+        drug licence and stock &amp; tax defaults for {mode} are in the Shop Details card above.
       </p>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field
           label="Invoice number prefix"
           hint={`Next invoice looks like ${draft.invoice_prefix || ""}123. Must differ from the other dashboard.`}
@@ -87,20 +84,6 @@ export const ModeSettingsCard = ({
             value={draft.invoice_prefix}
             onChange={(e) => set({ invoice_prefix: e.target.value.toUpperCase().slice(0, 8) })}
             placeholder={wholesale ? "W" : "(none)"}
-          />
-        </Field>
-        <Field label="Low stock threshold" hint="Blank = each medicine's own threshold">
-          <TextInput
-            type="number"
-            value={draft.low_stock_threshold}
-            onChange={(e) => set({ low_stock_threshold: e.target.value })}
-          />
-        </Field>
-        <Field label="Expiry alert (months)" hint="Blank = shop-wide setting">
-          <TextInput
-            type="number"
-            value={draft.expiry_alert_months}
-            onChange={(e) => set({ expiry_alert_months: e.target.value })}
           />
         </Field>
         <Field label="Max extra discount %" hint="Cap on the manual bill discount. Blank = no cap">

@@ -162,16 +162,28 @@ export async function getSettings(): Promise<ShopSettings | null> {
   return mapSettings(rows[0]);
 }
 
-/** Shop details plus this dashboard's settings, with the mode overrides applied. */
+/** This mode's shop identity, GSTIN / licence and stock & tax defaults, over the shop-wide
+    values (logo, colour theme and Instagram stay shared). A blank mode field uses the shop-wide one. */
+export const applyModeShopDetails = (shop: ShopSettings, ms: ModeSettings): ShopSettings => ({
+  ...shop,
+  shop_name: ms.shop_name || shop.shop_name,
+  full_name: ms.full_name || shop.full_name,
+  address: ms.address || shop.address,
+  phone: ms.phone || shop.phone,
+  shop_contact_number: ms.shop_contact_number || shop.shop_contact_number,
+  email: ms.email || shop.email,
+  gstin: ms.gstin || shop.gstin,
+  dl_no: ms.dl_no || shop.dl_no,
+  default_gst: ms.default_gst,
+  low_stock_threshold: ms.low_stock_threshold || shop.low_stock_threshold,
+  expiry_alert_months: ms.expiry_alert_months || shop.expiry_alert_months,
+});
+
+/** Shop details as seen from one billing mode, plus that mode's settings. */
 export async function getScopedSettings(mode: Mode): Promise<ScopedSettings | null> {
   const [shop, modeSettings] = await Promise.all([getSettings(), getModeSettings(mode)]);
   if (!shop) return null;
-  return {
-    ...shop,
-    low_stock_threshold: modeSettings.low_stock_threshold || shop.low_stock_threshold,
-    expiry_alert_months: modeSettings.expiry_alert_months || shop.expiry_alert_months,
-    mode_settings: modeSettings,
-  };
+  return { ...applyModeShopDetails(shop, modeSettings), mode_settings: modeSettings };
 }
 
 export async function getLedger(mode: Mode): Promise<LedgerData> {
