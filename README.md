@@ -10,22 +10,30 @@ The app has **two independent dashboards**:
 | **Nalam Care Medicals — Retail Billing** | Counter sales to walk-in customers, retail stock |
 | **Nalam Care Medicals — Wholesale Billing** | Bulk orders to retailers, medical shops, clinics, hospitals and distributors; wholesale stock |
 
-Both use **one shared medicine catalogue**. Everything else is separate per dashboard:
-stock and batches, prices, bills, customers, suppliers, payments, returns, purchase orders,
-reports and dashboard settings.
+Both use **one shared medicine catalogue** and **one shared supplier directory**. Everything
+else is separate per dashboard: stock and batches, prices, bills, customers, purchases,
+supplier payments and balances, returns, purchase orders, reports and settings.
 
 ## How the split works
 
 - **Catalogue (shared).** A medicine is added once (from Purchase or Inventory → Medicine
-  Master → Add Medicine) and appears in both dashboards. Editing it updates the one record.
-  Medicines with stock or sales history are *archived* instead of deleted.
+  Master → Add Medicine) and appears in both dashboards. Editing it updates the one record;
+  past invoices keep the details they were billed with. Medicines with stock or sales history
+  are *archived* instead of deleted.
+- **Suppliers (shared directory, separate accounts).** A supplier is added once and can be
+  bought from in either mode. Purchases, payments, returns and the balance owed are kept per
+  mode, so paying the retail balance never touches the wholesale one.
 - **Stock (per dashboard).** Every batch belongs to retail or wholesale. Retail receipts and
   sales only touch retail batches, wholesale only wholesale batches. Each batch carries its own
   purchase rate, MRP and selling price, so retail and wholesale prices differ naturally.
-  Nothing is synchronised between the two; there are no automatic transfers.
+  Nothing is synchronised automatically.
+- **Stock transfers (explicit, admin only).** Inventory → transfer icon on a batch moves units
+  to the other mode in one transaction. The receiving batch keeps the batch number, expiry
+  and purchase cost, is linked to the source batch, and gets its own selling price; both sides
+  are logged and supplier balances don't change. Batches in a transfer can't be deleted.
 - **Stock ledger.** Every change (receipt, sale, return, void, purchase return, damaged /
-  expired write-off, correction, reconciliation) is written to `stock_movements` — see
-  Inventory → history icon on a batch.
+  expired write-off, correction, transfer, reconciliation) is written to `stock_movements` —
+  see Inventory → history icon on a batch.
 - **Server-side checks.** Billing, receipts, returns and adjustments run in transactions with
   conditional updates: stock can't go negative, expired batches and prices above MRP are
   refused, and a double-submitted bill returns the first bill instead of deducting stock twice.

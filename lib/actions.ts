@@ -296,7 +296,8 @@ export async function restoreMedicine(mode: Mode, id: string): Promise<ActionRes
 }
 
 /* ==========================================================================
-   Suppliers (per mode)
+   Suppliers — one shared directory for both modes. Purchases, payments,
+   returns and balances against a supplier are recorded per mode.
    ========================================================================== */
 
 export async function saveSupplier(mode: Mode, payload: any): Promise<ActionResult<string>> {
@@ -309,12 +310,19 @@ export async function saveSupplier(mode: Mode, payload: any): Promise<ActionResu
       const res = await db
         .update(schema.suppliers)
         .set(values)
-        .where(and(eq(schema.suppliers.id, payload.id), eq(schema.suppliers.mode, mode)))
+        .where(eq(schema.suppliers.id, payload.id))
         .returning({ id: schema.suppliers.id });
-      if (!res.length) fail("Supplier not found in this dashboard.");
+      if (!res.length) fail("That supplier no longer exists.");
       return payload.id as string;
     }
-    const res = await db.insert(schema.suppliers).values({ ...values, mode }).returning({ id: schema.suppliers.id });
+    const clash = await db
+      .select({ id: schema.suppliers.id })
+      .from(schema.suppliers)
+      .where(sql`lower(${schema.suppliers.name}) = lower(${name})`)
+      .limit(1);
+    if (clash.length) fail(`${name} is already in the supplier directory.`);
+    // mode stays NULL: the directory is shared by retail and wholesale.
+    const res = await db.insert(schema.suppliers).values(values).returning({ id: schema.suppliers.id });
     return res[0].id;
   });
 }
@@ -322,17 +330,17 @@ export async function saveSupplier(mode: Mode, payload: any): Promise<ActionResu
 export async function deleteSupplier(mode: Mode, id: string): Promise<ActionResult<null>> {
   return run(async () => {
     await requireMode(mode, { admin: true });
-    const paid = await db
-      .select({ id: schema.payments.id })
-      .from(schema.payments)
-      .where(and(eq(schema.payments.supplierId, id), eq(schema.payments.mode, mode)))
-      .limit(1);
-    if (paid.length) fail("This supplier has payment history and can't be deleted.");
-    const res = await db
-      .delete(schema.suppliers)
-      .where(and(eq(schema.suppliers.id, id), eq(schema.suppliers.mode, mode)))
-      .returning({ id: schema.suppliers.id });
-    if (!res.length) fail("Supplier not found in this dashboard.");
+    const [bought, paid, ordered, returned] = await Promise.all([
+      db.select({ id: schema.batches.id }).from(schema.batches).where(eq(schema.batches.supplierId, id)).limit(1),
+      db.select({ id: schema.payments.id }).from(schema.payments).where(eq(schema.payments.supplierId, id)).limit(1),
+      db.select({ id: schema.purchaseOrders.id }).from(schema.purchaseOrders).where(eq(schema.purchaseOrders.supplierId, id)).limit(1),
+      db.select({ id: schema.purchaseReturns.id }).from(schema.purchaseReturns).where(eq(schema.purchaseReturns.supplierId, id)).limit(1),
+    ]);
+    // History in either mode keeps the shared record, so balances never lose their supplier.
+    if (bought.length || paid.length || ordered.length || returned.length)
+      fail("This supplier has purchase or payment history (retail or wholesale) and can't be deleted.");
+    const res = await db.delete(schema.suppliers).where(eq(schema.suppliers.id, id)).returning({ id: schema.suppliers.id });
+    if (!res.length) fail("That supplier no longer exists.");
     return null;
   });
 }
@@ -341,14 +349,14 @@ export async function deleteSupplier(mode: Mode, id: string): Promise<ActionResu
    Stock: goods receipt, batch edits, adjustments
    ========================================================================== */
 
-const assertSupplierInMode = async (exec: Exec, mode: Mode, supplierId: string | null) => {
+const assertSupplierExists = async (exec: Exec, supplierId: string | null) => {
   if (!supplierId) return;
   const rows = await exec
     .select({ id: schema.suppliers.id })
     .from(schema.suppliers)
-    .where(and(eq(schema.suppliers.id, supplierId), eq(schema.suppliers.mode, mode)))
+    .where(eq(schema.suppliers.id, supplierId))
     .limit(1);
-  if (!rows.length) fail("That supplier belongs to the other dashboard.");
+  if (!rows.length) fail("That supplier is no longer in the directory.");
 };
 
 /** Goods receipt (new batch) or batch edit. New stock only ever lands in `mode`. */
@@ -374,7 +382,7 @@ export async function saveBatch(mode: Mode, payload: any): Promise<ActionResult<
     const supplierId = str(payload.supplier_id) || null;
 
     return db.transaction(async (tx) => {
-      await assertSupplierInMode(tx, mode, supplierId);
+      await assertSupplierExists(tx, supplierId);
       const med = await tx
         .select({ id: schema.medicines.id })
         .from(schema.medicines)
@@ -463,6 +471,10 @@ export async function deleteBatch(mode: Mode, id: string): Promise<ActionResult<
       .where(eq(schema.purchaseReturns.batchId, id))
       .limit(1);
     if (returned.length) fail("This batch has purchase returns recorded and can't be deleted.");
+    const self = await db.select({ source: schema.batches.sourceBatchId }).from(schema.batches).where(eq(schema.batches.id, id)).limit(1);
+    const transferredOut = await db.select({ id: schema.batches.id }).from(schema.batches).where(eq(schema.batches.sourceBatchId, id)).limit(1);
+    if (self[0]?.source || transferredOut.length)
+      fail("This batch is part of a stock transfer between retail and wholesale. Adjust its stock instead of deleting it.");
     const actor = await actorOf();
     await db.transaction(async (tx) => {
       const res = await tx
@@ -522,6 +534,123 @@ export async function adjustStock(
         actor,
       });
       return res[0].stockQty;
+    });
+  });
+}
+
+/**
+ * Move stock between retail and wholesale — the only way stock crosses modes.
+ * Admin only, with access to both. In one transaction the units leave the
+ * source batch and land in a batch in the other mode that keeps the same
+ * batch number, expiry and purchase cost (linked by source_batch_id). The
+ * transferred batch records no new purchase, so supplier balances are unchanged.
+ */
+export async function transferStock(
+  from: Mode,
+  payload: { batch_id: string; qty: number; selling_price: number; box?: string; note?: string },
+): Promise<ActionResult<{ batch_id: string; to: Mode; source_left: number; destination_qty: number }>> {
+  return run(async () => {
+    const to: Mode = from === "retail" ? "wholesale" : "retail";
+    await requireMode(from, { admin: true });
+    await requireMode(to, { admin: true });
+    const actor = await actorOf();
+    const qty = int(payload.qty);
+    if (qty <= 0) fail("Enter the number of units to transfer.");
+    const selling = round2(num(payload.selling_price));
+
+    return db.transaction(async (tx) => {
+      const src = await tx
+        .select()
+        .from(schema.batches)
+        .where(and(eq(schema.batches.id, payload.batch_id), eq(schema.batches.mode, from)))
+        .limit(1);
+      if (!src.length) fail("Batch not found in this dashboard.");
+      const b = src[0];
+      if (isExpired(b.expDate)) fail(`Batch ${b.batchNo} has expired and can't be transferred.`);
+      if (selling <= 0) fail(`Enter the ${to} selling price per pack.`);
+      if (selling > num(b.mrp)) fail("Selling price cannot be higher than the MRP.");
+
+      const out = await tx
+        .update(schema.batches)
+        .set({ stockQty: sql`${schema.batches.stockQty} - ${qty}` })
+        .where(and(eq(schema.batches.id, b.id), eq(schema.batches.mode, from), gte(schema.batches.stockQty, qty)))
+        .returning();
+      if (!out.length) fail(`Only ${b.stockQty} units left in batch ${b.batchNo}.`);
+
+      // Repeat transfers of the same batch top up the one destination batch.
+      const existing = await tx
+        .select()
+        .from(schema.batches)
+        .where(and(eq(schema.batches.sourceBatchId, b.id), eq(schema.batches.mode, to)))
+        .limit(1);
+      let dest: typeof schema.batches.$inferSelect;
+      if (existing.length) {
+        const res = await tx
+          .update(schema.batches)
+          .set({
+            stockQty: sql`${schema.batches.stockQty} + ${qty}`,
+            stockAdded: sql`${schema.batches.stockAdded} + ${qty}`,
+            sellingPrice: String(selling),
+            ...(str(payload.box) && { box: str(payload.box).toUpperCase() }),
+          })
+          .where(eq(schema.batches.id, existing[0].id))
+          .returning();
+        dest = res[0];
+      } else {
+        const res = await tx
+          .insert(schema.batches)
+          .values({
+            medicineId: b.medicineId,
+            supplierId: b.supplierId,
+            brandName: b.brandName,
+            manufacturer: b.manufacturer,
+            invoiceNo: b.invoiceNo,
+            purchaseDate: b.purchaseDate,
+            batchNo: b.batchNo,
+            mfgDate: b.mfgDate,
+            expDate: b.expDate,
+            box: str(payload.box).toUpperCase() || b.box,
+            purchaseUnitType: b.purchaseUnitType,
+            packSize: b.packSize,
+            qtyPacks: 0, // not a purchase: the supplier was already owed for these on the source side
+            stockAdded: qty,
+            stockQty: qty,
+            purchaseRate: b.purchaseRate,
+            mrp: b.mrp,
+            sellingPrice: String(selling),
+            gstPercent: b.gstPercent,
+            mode: to,
+            sourceBatchId: b.id,
+          })
+          .returning();
+        dest = res[0];
+      }
+
+      const reference = `TRF-${dest.id.slice(0, 8).toUpperCase()}`;
+      const note = str(payload.note);
+      await logMovement(tx, {
+        mode: from,
+        batchId: b.id,
+        medicineId: b.medicineId,
+        type: "TRANSFER_OUT",
+        qtyChange: -qty,
+        balanceAfter: out[0].stockQty,
+        reference,
+        note: note || `To ${to} inventory`,
+        actor,
+      });
+      await logMovement(tx, {
+        mode: to,
+        batchId: dest.id,
+        medicineId: b.medicineId,
+        type: "TRANSFER_IN",
+        qtyChange: qty,
+        balanceAfter: dest.stockQty,
+        reference,
+        note: note || `From ${from} inventory (batch ${b.batchNo})`,
+        actor,
+      });
+      return { batch_id: dest.id, to, source_left: out[0].stockQty, destination_qty: dest.stockQty };
     });
   });
 }
@@ -1266,7 +1395,7 @@ export async function recordSupplierPayment(
     const amount = round2(num(payload.amount));
     if (amount <= 0) fail("Enter the amount paid.");
     return db.transaction(async (tx) => {
-      await assertSupplierInMode(tx, mode, payload.supplier_id);
+      await assertSupplierExists(tx, payload.supplier_id);
       if (!payload.supplier_id) fail("Pick a supplier.");
       const outstanding = await supplierOutstanding(tx, mode, payload.supplier_id);
       if (amount > outstanding + 0.001) fail(`Only ₹${Math.max(0, outstanding).toFixed(2)} is outstanding to this supplier.`);
@@ -1346,7 +1475,7 @@ export async function savePurchaseOrder(
   return run(async () => {
     await requireMode(mode, { admin: true });
     if (!payload.supplier_id) fail("Pick a supplier for the order.");
-    await assertSupplierInMode(db, mode, payload.supplier_id);
+    await assertSupplierExists(db, payload.supplier_id);
     const items = (payload.items || [])
       .map((i) => ({
         medicine_id: str(i.medicine_id),

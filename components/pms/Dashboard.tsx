@@ -10,8 +10,11 @@ import {
   TrendingUp,
   Users,
   ArrowRight,
+  Wallet,
+  Truck,
+  ClipboardList,
 } from "lucide-react";
-import type { Bill, MedicineWithBatches } from "@/lib/types";
+import type { Bill, LedgerData, MedicineWithBatches } from "@/lib/types";
 import { amount, expiryState, money, monthSlash, timeLabel, todayIso } from "@/lib/format";
 import { round2 } from "@/lib/calc";
 import { Card, PageTitle, Pill, ValuePopup } from "./ui";
@@ -22,14 +25,59 @@ export const Dashboard = ({
   medicines,
   bills,
   customerCount,
+  ledger,
   onNavigate,
 }: {
   medicines: MedicineWithBatches[];
   bills: Bill[];
   customerCount: number;
+  ledger?: LedgerData;
   onNavigate: (screen: ScreenKey) => void;
 }) => {
   const mode = useMode();
+
+  /* This month's figures for this mode, from the transactions themselves
+     (sale price and cost captured on each bill line, not today's catalogue). */
+  const month = useMemo(() => {
+    const today = todayIso();
+    const start = `${today.slice(0, 7)}-01`;
+    const batchCost = new Map<string, number>();
+    let purchases = 0;
+    for (const m of medicines)
+      for (const b of m.batches) {
+        batchCost.set(b.id, round2(b.purchase_rate / (b.pack_size || 1)));
+        if (!b.source_batch_id && b.purchase_date >= start) purchases += b.purchase_rate * b.qty_packs;
+      }
+    let sales = 0;
+    let cost = 0;
+    let count = 0;
+    let outstanding = 0;
+    let overdue = 0;
+    for (const bill of bills) {
+      outstanding += bill.due_amount;
+      if (bill.due_amount > 0 && bill.due_date && bill.due_date < today) overdue += bill.due_amount;
+      if (bill.bill_date < start) continue;
+      count += 1;
+      const lines = bill.items.reduce((s, i) => s + i.line_amount, 0);
+      const f = lines > 0 ? bill.grand_total / lines : 1;
+      for (const i of bill.items) {
+        const net = i.qty - i.returned_qty;
+        sales += i.per_unit_price * net * f;
+        cost += (i.cost_per_unit || batchCost.get(i.batch_id) || 0) * net;
+      }
+    }
+    const profit = round2(sales - cost);
+    return {
+      sales: round2(sales),
+      count,
+      profit,
+      margin: sales > 0 ? (profit / sales) * 100 : 0,
+      purchases: round2(purchases),
+      outstanding: round2(outstanding),
+      overdue: round2(overdue),
+      pendingOrders: (ledger?.purchaseOrders ?? []).filter((o) => o.status === "ORDERED"),
+    };
+  }, [medicines, bills, ledger]);
   const stats = useMemo(() => {
     const today = todayIso();
     const todayBills = bills.filter((b) => b.bill_date === today);
@@ -150,6 +198,52 @@ export const Dashboard = ({
           sub={`${customerCount} registered customers`}
           tone="green"
         />
+      </div>
+
+      {/* This month — profit, receivables, purchases */}
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          icon={<TrendingUp className="h-5 w-5" />}
+          label="Profit This Month"
+          value={money(month.profit)}
+          sub={`${month.margin.toFixed(1)}% margin on ${money(month.sales)}`}
+          tone="green"
+        />
+        <KpiCard
+          icon={<Wallet className="h-5 w-5" />}
+          label={mode === "wholesale" ? "Receivables" : "Customer Outstanding"}
+          value={money(month.outstanding)}
+          sub={month.overdue > 0 ? `${money(month.overdue)} overdue` : "Nothing overdue"}
+          tone="blue"
+        />
+        <KpiCard
+          icon={<Truck className="h-5 w-5" />}
+          label="Purchases This Month"
+          value={money(month.purchases)}
+          sub="Stock received, at cost"
+          tone="gray"
+        />
+        {mode === "wholesale" ? (
+          <KpiCard
+            icon={<ClipboardList className="h-5 w-5" />}
+            label="Pending Purchase Orders"
+            value={String(month.pendingOrders.length)}
+            sub={
+              month.pendingOrders.length
+                ? `₹${amount(month.pendingOrders.reduce((s, o) => s + o.items.reduce((t, i) => t + i.packs * i.rate, 0), 0))} on order`
+                : "No open orders"
+            }
+            tone="blue"
+          />
+        ) : (
+          <KpiCard
+            icon={<Receipt className="h-5 w-5" />}
+            label="Sales This Month"
+            value={money(month.sales)}
+            sub={`${month.count} bills`}
+            tone="blue"
+          />
+        )}
       </div>
 
       {/* Alerts row */}

@@ -100,6 +100,8 @@ export type Batch = {
   gst_percent: number;
   /** Which inventory this batch belongs to; null = legacy stock awaiting reconciliation */
   mode: Mode | null;
+  /** Batch this one was transferred from (other mode), for traceability; null for purchased stock */
+  source_batch_id: string | null;
   created_at: string;
 };
 

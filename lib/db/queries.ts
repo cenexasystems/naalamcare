@@ -117,8 +117,10 @@ export async function listBatchRows(mode: Mode): Promise<BatchRow[]> {
   return toBatchRows(rows, modeSettings.low_stock_threshold);
 }
 
-export async function listSuppliers(mode: Mode): Promise<Supplier[]> {
-  const rows = await db.select().from(schema.suppliers).where(eq(schema.suppliers.mode, mode)).orderBy(schema.suppliers.name);
+/** The supplier directory is shared by both modes; balances are worked out per mode from that mode's records. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function listSuppliers(_mode: Mode): Promise<Supplier[]> {
+  const rows = await db.select().from(schema.suppliers).orderBy(schema.suppliers.name);
   return rows.map(mapSupplier);
 }
 
@@ -212,7 +214,7 @@ export async function listStockMovements(mode: Mode, batchId: string): Promise<S
 
 /** Legacy rows from before the retail / wholesale split (mode IS NULL). */
 export async function getReconciliation(): Promise<ReconciliationSummary> {
-  const [batchRows, bills, customers, suppliers] = await Promise.all([
+  const [batchRows, bills, customers] = await Promise.all([
     db
       .select({ batch: schema.batches, med: schema.medicines })
       .from(schema.batches)
@@ -221,12 +223,12 @@ export async function getReconciliation(): Promise<ReconciliationSummary> {
       .orderBy(asc(schema.medicines.genericName)),
     db.select({ id: schema.bills.id }).from(schema.bills).where(isNull(schema.bills.mode)),
     db.select({ id: schema.customers.id }).from(schema.customers).where(isNull(schema.customers.mode)),
-    db.select({ id: schema.suppliers.id }).from(schema.suppliers).where(isNull(schema.suppliers.mode)),
   ]);
   return {
     batches: await toBatchRows(batchRows),
     bills: bills.length,
     customers: customers.length,
-    suppliers: suppliers.length,
+    // Suppliers are a shared directory — nothing to classify.
+    suppliers: 0,
   };
 }

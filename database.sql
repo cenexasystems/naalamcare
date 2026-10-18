@@ -450,3 +450,12 @@ UPDATE "mode_settings" m SET
   "expiry_alert_months" = CASE WHEN m."expiry_alert_months" = 0 THEN s."expiry_alert_months" ELSE m."expiry_alert_months" END
 FROM "settings" s
 WHERE s."id" = 1 AND m."shop_name" = '';
+
+-- ---------------------------------------------------------------------------
+-- 8. Shared supplier directory + stock transfers between Retail and Wholesale
+-- ---------------------------------------------------------------------------
+
+UPDATE "suppliers" SET "mode" = NULL WHERE "mode" IS NOT NULL;
+
+ALTER TABLE "batches" ADD COLUMN IF NOT EXISTS "source_batch_id" uuid;
+CREATE INDEX IF NOT EXISTS "batches_source_batch_idx" ON "batches" USING btree ("source_batch_id");

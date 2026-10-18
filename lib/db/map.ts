@@ -76,6 +76,7 @@ export const mapBatch = (row: any): Batch => ({
   selling_price: toNum(row.sellingPrice),
   gst_percent: toNum(row.gstPercent),
   mode: modeOrNull(row.mode),
+  source_batch_id: row.sourceBatchId ?? null,
   created_at: row.createdAt.toISOString(),
 });
 

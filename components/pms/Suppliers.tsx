@@ -25,7 +25,8 @@ type SupplierAccount = {
 /** Purchase value per supplier = purchase rate × packs received on each batch. */
 const buildAccounts = (suppliers: Supplier[], rows: BatchRow[], ledger?: LedgerData): SupplierAccount[] =>
   suppliers.map((supplier) => {
-    const own = rows.filter((r) => r.batch.supplier_id === supplier.id);
+    // Transferred batches keep the supplier for traceability but are not purchases.
+    const own = rows.filter((r) => r.batch.supplier_id === supplier.id && !r.batch.source_batch_id);
     const invoices = new Map<string, { invoice_no: string; date: string; lines: number; value: number }>();
     let purchased = 0;
     for (const { batch } of own) {
@@ -123,8 +124,8 @@ export const Suppliers = ({
   return (
     <div>
       <PageTitle
-        title={mode === "wholesale" ? "Wholesale Suppliers" : "Suppliers"}
-        subtitle="Purchases, payments and balances owed — this dashboard only"
+        title="Suppliers"
+        subtitle={`One supplier directory for retail and wholesale — purchases, payments and balances shown are ${mode} only`}
         right={
           <>
             <Button variant="ghost" onClick={exportList}>
@@ -217,7 +218,7 @@ export const Suppliers = ({
               {!filtered.length && (
                 <tr>
                   <td colSpan={9} className="px-4 py-16 text-center text-[13.5px] text-gray-400">
-                    No suppliers in this dashboard yet.
+                    No suppliers in the directory yet.
                   </td>
                 </tr>
               )}

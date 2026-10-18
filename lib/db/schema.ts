@@ -94,6 +94,8 @@ export const batches = pgTable(
     gstPercent: numeric("gst_percent", { precision: 5, scale: 2 }).notNull().default("0"),
     /** "retail" | "wholesale" | NULL (legacy stock awaiting reconciliation) */
     mode: text("mode"),
+    /** Set when this batch was created by a stock transfer: the batch it came from (same batch no. / expiry / cost). */
+    sourceBatchId: uuid("source_batch_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

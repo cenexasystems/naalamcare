@@ -19,11 +19,12 @@ import {
   X,
   History,
   PackageMinus,
+  ArrowLeftRight,
 } from "lucide-react";
 import type { Batch, BatchRow, DrugSchedule, Medicine, MedicineWithBatches, PurchaseUnitType, StockMovement } from "@/lib/types";
 import { amount, dateSlash, expiryState, monthSlash, scheduleLabel, timeLabel, unitNoun } from "@/lib/format";
-import { adjustStock, deleteBatch, deleteMedicine, getBatchMovements, saveBatch, saveMedicine } from "@/lib/actions";
-import { act, useMode } from "./mode-context";
+import { adjustStock, deleteBatch, deleteMedicine, getBatchMovements, saveBatch, saveMedicine, transferStock } from "@/lib/actions";
+import { act, useMode, useModeState } from "./mode-context";
 import { useReconciliation } from "./data";
 import { INVENTORY_SHEET } from "./exports";
 import { downloadCsv, downloadExcel } from "@/lib/xlsx";
@@ -62,6 +63,11 @@ export const Inventory = ({
   const [editMedicine, setEditMedicine] = useState<Medicine | null>(null);
   const [adjusting, setAdjusting] = useState<BatchRow | null>(null);
   const [historyOf, setHistoryOf] = useState<BatchRow | null>(null);
+  const [transferring, setTransferring] = useState<BatchRow | null>(null);
+  const modeState = useModeState();
+  const otherMode = modeState?.mode === "wholesale" ? "retail" : "wholesale";
+  /** Transfers need an admin who can open both modes (checked again on the server). */
+  const canTransfer = role === "admin" && Boolean(modeState?.modes.includes(otherMode));
   const mode = useMode();
   const { data: reconciliation } = useReconciliation(role === "admin");
   const legacyBatches = reconciliation?.batches.length ?? 0;
@@ -411,6 +417,16 @@ export const Inventory = ({
                         {role === "admin" && (
                           <td className="td">
                             <div className="flex items-center justify-end gap-1.5">
+                              {canTransfer && batch.stock_qty > 0 && (
+                                <button
+                                  onClick={() => setTransferring(row)}
+                                  aria-label={`Transfer to ${otherMode}`}
+                                  title={`Transfer stock to ${otherMode}`}
+                                  className="cursor-pointer rounded-md p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-[var(--c-deep)]"
+                                >
+                                  <ArrowLeftRight className="h-4 w-4" />
+                                </button>
+                              )}
                               <button
                                 onClick={() => setAdjusting(row)}
                                 aria-label="Adjust stock"
@@ -561,6 +577,15 @@ export const Inventory = ({
         }}
       />
       <MovementsModal key={historyOf?.batch.id || "no-history"} row={historyOf} onClose={() => setHistoryOf(null)} />
+      <TransferModal
+        key={transferring?.batch.id || "no-transfer"}
+        row={transferring}
+        onClose={() => setTransferring(null)}
+        onSaved={(message) => {
+          setTransferring(null);
+          onChanged(message);
+        }}
+      />
     </div>
   );
 };
@@ -1044,6 +1069,86 @@ const NEW_MEDICINE: Medicine = {
 
 /* ----------------------------- stock adjustment --------------------------- */
 
+/* ------------------------- stock transfer between modes ------------------- */
+
+const TransferModal = ({
+  row,
+  onClose,
+  onSaved,
+}: {
+  row: BatchRow | null;
+  onClose: () => void;
+  onSaved: (message: string) => void;
+}) => {
+  const mode = useMode();
+  const to = mode === "retail" ? "wholesale" : "retail";
+  const [unitsIn, setUnitsIn] = useState("");
+  const [price, setPrice] = useState(row ? String(row.batch.selling_price) : "");
+  const [box, setBox] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  if (!row) return null;
+
+  const { batch, medicine } = row;
+  const units = Math.floor(Number(unitsIn) || 0);
+  const packs = units / (batch.pack_size || 1);
+  const sellingPack = Number(price) || 0;
+  const valid = units > 0 && units <= batch.stock_qty && sellingPack > 0 && sellingPack <= batch.mrp;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Transfer to ${to === "wholesale" ? "Wholesale" : "Retail"}`}
+      subtitle={`${medicine.generic_name} · Batch ${batch.batch_no} · EXP ${monthSlash(batch.exp_date)} · ${batch.stock_qty} units in ${mode}`}
+      width="max-w-lg"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!valid || saving}
+            onClick={async () => {
+              setSaving(true);
+              const res = await act(transferStock(mode, { batch_id: batch.id, qty: units, selling_price: sellingPack, box, note }));
+              setSaving(false);
+              if (res.ok)
+                onSaved(`${units} units of ${medicine.generic_name} moved to ${to}. ${mode} now has ${res.data.source_left}.`);
+            }}
+          >
+            {saving ? "Transferring…" : "Transfer"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Units to transfer" hint={units ? `${Math.round(packs * 100) / 100} ${batch.purchase_unit_type}s of ${batch.pack_size}` : undefined}>
+            <TextInput type="number" value={unitsIn} onChange={(e) => setUnitsIn(e.target.value)} placeholder={String(batch.stock_qty)} />
+          </Field>
+          <Field label={`${to === "wholesale" ? "Wholesale" : "Retail"} selling price / ${batch.purchase_unit_type} (₹)`} hint={`MRP ₹${amount(batch.mrp)}`}>
+            <TextInput type="number" value={price} onChange={(e) => setPrice(e.target.value)} />
+          </Field>
+          <Field label="Box (destination)">
+            <TextInput value={box} onChange={(e) => setBox(e.target.value.toUpperCase())} placeholder={batch.box || "A1"} />
+          </Field>
+          <Field label="Note">
+            <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />
+          </Field>
+        </div>
+        {units > batch.stock_qty && <p className="text-[12.5px] font-semibold text-red-600">Only {batch.stock_qty} units in this batch.</p>}
+        {sellingPack > batch.mrp && <p className="text-[12.5px] font-semibold text-red-600">Selling price can&rsquo;t be above the MRP.</p>}
+        <p className="text-[12px] leading-relaxed text-gray-500">
+          The units leave this {mode} batch and are added to {to} stock under the same batch number, expiry and
+          purchase cost, linked back to this batch. Both sides are recorded in the stock history. The supplier balance
+          doesn&rsquo;t change.
+        </p>
+      </div>
+    </Modal>
+  );
+};
+
 const ADJUST_REASONS = [
   { key: "DAMAGED", label: "Damaged — write off" },
   { key: "EXPIRED", label: "Expired — write off" },
@@ -1143,6 +1248,8 @@ const MOVEMENT_LABEL: Record<string, string> = {
   DAMAGED: "Damaged",
   EXPIRED: "Expired",
   RECLASSIFY: "Assigned to inventory",
+  TRANSFER_OUT: "Transferred out",
+  TRANSFER_IN: "Transferred in",
   EDIT: "Edited",
 };
 

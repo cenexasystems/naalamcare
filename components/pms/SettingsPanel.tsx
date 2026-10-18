@@ -310,7 +310,7 @@ export const SettingsPanel = ({
         <Card className="p-5">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-[15px] font-bold text-gray-900">
-              {mode === "wholesale" ? "Wholesale Suppliers" : "Suppliers"}
+              Suppliers <span className="text-[12px] font-medium text-gray-500">— shared directory</span>
             </h3>
             <Button variant="ghost" className="py-2 text-[13px]" onClick={() => setAddingSupplier(true)}>
               <Plus className="h-4 w-4" /> Add supplier

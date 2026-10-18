@@ -167,6 +167,7 @@ const buildSeed = (): Store => {
       selling_price: row.selling,
       gst_percent: row.gst,
       mode: null,
+      source_batch_id: null,
       created_at: created,
     });
   });

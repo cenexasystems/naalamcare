@@ -128,13 +128,24 @@ export const buildReport = (kind: ReportKind, ctx: Ctx): ReportTableData | null 
       }
       const rows = [...map.values()]
         .sort((a, b) => b.sales - a.sales)
-        .map((r, n) => [n + 1, r.id || "—", r.name, r.bills, round2(r.sales), round2(r.returned), round2(r.paid), round2(r.due)]);
+        .map((r, n) => [
+          n + 1,
+          r.id || "—",
+          r.name,
+          customers.find((c) => c.id === r.id)?.business_type || (r.id ? "—" : "Walk-in"),
+          r.bills,
+          round2(r.sales),
+          round2(r.returned),
+          round2(r.paid),
+          round2(r.due),
+        ]);
       return {
         title: "Customer-wise sales",
         columns: [
           { header: "Sno", width: 6 },
           { header: "Customer ID", width: 13 },
           { header: "Customer", width: 26 },
+          { header: "Type", width: 14 },
           { header: "Bills", width: 8, numeric: true },
           { header: "Sales (₹)", width: 13, numeric: true },
           { header: "Returns (₹)", width: 12, numeric: true },
@@ -216,6 +227,7 @@ export const buildReport = (kind: ReportKind, ctx: Ctx): ReportTableData | null 
       const map = new Map<string, { date: string; supplier: string; invoice: string; lines: number; packs: number; value: number; gst: number }>();
       for (const { batch } of batchRows) {
         if (!inRange(batch.purchase_date, start, end)) continue;
+        if (batch.source_batch_id) continue; // stock transfers are not purchases
         const key = `${batch.supplier_id}|${batch.invoice_no}|${batch.purchase_date}`;
         const cur = map.get(key) || {
           date: batch.purchase_date,

@@ -300,6 +300,7 @@ function Workspace({
               medicines={medicines}
               bills={bills}
               customerCount={customers.length}
+              ledger={ledger}
               onNavigate={setScreen}
             />
           )}
