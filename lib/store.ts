@@ -24,8 +24,19 @@ import {
 import { calcBillTotals, calcIncludedGst, round2 } from "./calc";
 
 const STORAGE_KEY = "nalam_care_medicals_pms_v2";
-/** Key used before the rename — read once so held bills on this device carry over. */
-const LEGACY_STORAGE_KEY = "ak_pharma_pms_v2";
+/** Browser keys left by the previous app on this device — removed on first load. */
+const OLD_KEYS = ["ak_pharma_pms_v2", "ak_pharma_session"];
+
+const removeOldBrowserData = () => {
+  try {
+    for (const key of OLD_KEYS) {
+      window.localStorage.removeItem(key);
+      window.sessionStorage.removeItem(key);
+    }
+  } catch {
+    /* storage unavailable — nothing to remove */
+  }
+};
 
 export const uid = (): string => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -219,7 +230,8 @@ export const readStore = (): Store => {
   if (typeof window === "undefined") return emptyStore();
   if (cache) return cache;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
+    removeOldBrowserData();
+    const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) {
       const seeded = buildSeed();
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));

@@ -369,34 +369,20 @@ CREATE TABLE IF NOT EXISTS "purchase_orders" (
 );
 CREATE INDEX IF NOT EXISTS "purchase_orders_mode_idx" ON "purchase_orders" USING btree ("mode");
 
--- ---------- Branding ----------
--- Rename the default shop and drop the old brand's logo path. Only rows still
--- carrying the previous defaults are touched; anything an owner typed in is kept.
-UPDATE "settings" SET "shop_name" = 'Nalam Care Medicals' WHERE "id" = 1 AND "shop_name" = 'AK PHARMA';
-UPDATE "settings" SET "logo" = '/logos/nalam-care-medicals-logo.png'
-WHERE "id" = 1 AND "logo" IN ('/logos/ak-pharma-logo-square.jpeg', '/logos/ak-pharma-logo-banner.jpeg', '/logo.jpeg');
--- The previous owner's contact details would otherwise print on Nalam Care
--- Medicals invoices. Clear them only while they still hold the old values; the
--- new details are entered in Settings.
-UPDATE "settings" SET
-  "full_name" = CASE WHEN "full_name" = 'Aravinthan A' THEN '' ELSE "full_name" END,
-  "address" = CASE WHEN "address" = 'NO 2 , Venugopalapuram , kill nachipattu post , Tiruvannamalai 606 611' THEN '' ELSE "address" END,
-  "phone" = CASE WHEN "phone" = '7259103278' THEN '' ELSE "phone" END,
-  "email" = CASE WHEN "email" = 'akaravinthan2413@gmail.com' THEN '' ELSE "email" END
-WHERE "id" = 1;
-
 -- ---------------------------------------------------------------------------
 -- 4. Shop details, logo and colour theme
 -- ---------------------------------------------------------------------------
 
+-- Fills in only what is still empty (or still the original default), so running
+-- this file again never overwrites details changed in Settings.
 UPDATE "settings" SET
-  "shop_name" = 'Nalam Care Medicals',
-  "address" = 'No. 18A/2B, Ground Floor, Old Township Road, Venkatapuram, Ambattur (OT), Chennai - 600053',
-  "phone" = '7305723203',
-  "shop_contact_number" = '8122884066',
-  "email" = 'sselvathurai00@gmail.com',
-  "logo" = '/logos/nalam-care-medicals-logo.png',
-  "colour_theme" = 'nalam'
+  "shop_name" = CASE WHEN "shop_name" = '' THEN 'Nalam Care Medicals' ELSE "shop_name" END,
+  "address" = CASE WHEN "address" = '' THEN 'No. 18A/2B, Ground Floor, Old Township Road, Venkatapuram, Ambattur (OT), Chennai - 600053' ELSE "address" END,
+  "phone" = CASE WHEN "phone" = '' THEN '7305723203' ELSE "phone" END,
+  "shop_contact_number" = CASE WHEN "shop_contact_number" = '' THEN '8122884066' ELSE "shop_contact_number" END,
+  "email" = CASE WHEN "email" = '' THEN 'sselvathurai00@gmail.com' ELSE "email" END,
+  "logo" = CASE WHEN "logo" = '' THEN '/logos/nalam-care-medicals-logo.png' ELSE "logo" END,
+  "colour_theme" = CASE WHEN "colour_theme" IN ('', 'green', 'teal') THEN 'nalam' ELSE "colour_theme" END
 WHERE "id" = 1;
 
 -- ---------------------------------------------------------------------------

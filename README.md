@@ -138,21 +138,16 @@ npm run dev
 
 ### Database
 
-New database: run `database.sql`, then `drizzle/0006_add_invoice_customer_details.sql` and
-`drizzle/0007_nalam_dual_mode.sql`, then `drizzle/0008_nalam_shop_details.sql` and `drizzle/0009_app_users.sql` (Neon SQL editor or `psql`). Optional sample data:
-`npx tsx scripts/seed.ts` (seeds into the retail dashboard).
+The whole schema is one file, **`database.sql`**. Run it in the Neon SQL Editor, with `psql`,
+or with `node scripts/setup-db.mjs` (uses `.env.local`). It works on a new, empty database and
+is safe to run again on an existing one: it only adds what's missing, never deletes anything,
+and never overwrites details changed in Settings.
 
-Existing database: run `drizzle/0007_nalam_dual_mode.sql`, then `drizzle/0008_nalam_shop_details.sql` (shop address, phone, email, logo and the logo-blue theme) and
-`drizzle/0009_app_users.sql` (user accounts). It is additive and safe to re-run:
-new columns and tables only, legacy rows left unclassified, bills already settled at the
-counter marked as paid. It renames the shop to Nalam Care Medicals only if it still has the
-old default name, and clears the previous owner's address / phone / email only if they still
-hold the old values, so they don't print on new invoices.
+Optional sample data: `npx tsx scripts/seed.ts` (seeds into the retail dashboard).
 
 ## URLs
 
 - POS: `/` or `/pos/admin/secure/control-panel/nalam-care-medicals`
-  (the old `/…/ak-pharma` address redirects here)
 - Printable invoice / PDF: `/invoice/[bill-no]`
 - Public store page: `/store` (details come from Settings → Shop Details)
 
@@ -170,8 +165,8 @@ lib/
   actions.ts                server actions (all writes)
   db/schema.ts, queries.ts  Drizzle schema and mode-scoped reads
   calc.ts, format.ts, xlsx.ts
-drizzle/                    SQL migrations
-branding-archive/           previous brand's logo files (not served)
+database.sql                complete database schema (single file)
+scripts/setup-db.mjs        runs database.sql against DATABASE_URL
 ```
 
 ## License

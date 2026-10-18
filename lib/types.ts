@@ -115,7 +115,7 @@ export type MedicineWithBatches = Medicine & {
 };
 
 export type Customer = {
-  /** NCM000001 (retail) / NCW000001 (wholesale); older records keep AKP000001 */
+  /** NCM000001 (retail) / NCW000001 (wholesale) */
   id: string;
   name: string;
   phone: string;

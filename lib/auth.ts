@@ -125,7 +125,7 @@ export const resolvePasscode = async (passcode: string): Promise<SessionInfo | n
     const rows = await db.select().from(schema.appUsers).where(eq(schema.appUsers.passcodeHash, hashPasscode(entered))).limit(1);
     if (rows.length) return accountSession(rows[0]);
   } catch (err) {
-    // Before drizzle/0009_app_users.sql has run there are no accounts yet; the
+    // Before database.sql has created app_users there are no accounts yet; the
     // environment passcodes must keep working.
     if (!/app_users/.test(String((err as { cause?: unknown })?.cause ?? err))) throw err;
   }
