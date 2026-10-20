@@ -764,6 +764,44 @@ export async function saveCustomer(mode: Mode, payload: any): Promise<ActionResu
   });
 }
 
+/**
+ * Wholesale billing → "+ New pharmacy". Anyone billing wholesale may add one;
+ * only the contact details are taken — credit terms and discounts stay admin-only
+ * (Customers screen).
+ */
+export async function addPharmacyAtBilling(payload: {
+  name: string;
+  phone?: string;
+  gstin?: string;
+  address?: string;
+}): Promise<ActionResult<string>> {
+  return run(async () => {
+    await requireMode("wholesale");
+    const name = str(payload.name);
+    if (!name) fail("Enter the pharmacy name.");
+    const phone = str(payload.phone);
+    const gstin = str(payload.gstin).toUpperCase();
+    const dupe = await db
+      .select({ id: schema.customers.id })
+      .from(schema.customers)
+      .where(
+        and(
+          eq(schema.customers.mode, "wholesale"),
+          phone ? eq(schema.customers.phone, phone) : sql`lower(${schema.customers.name}) = ${name.toLowerCase()}`,
+        ),
+      )
+      .limit(1);
+    if (dupe.length) fail(`This pharmacy is already saved as ${dupe[0].id} — search for it instead.`);
+    const id = formatCustomerId(await nextVal(db, "customer_seq"), "wholesale");
+    await db.insert(schema.customers).values({
+      id,
+      ...customerValues({ name, phone, gstin, address: str(payload.address), business_type: "Medical Shop" }),
+      mode: "wholesale",
+    });
+    return id;
+  });
+}
+
 export async function deleteCustomer(mode: Mode, id: string): Promise<ActionResult<null>> {
   return run(async () => {
     await requireMode(mode, { admin: true });

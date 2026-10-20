@@ -19,10 +19,10 @@ import type { Batch, Bill, CartLine, Customer, DiscountTier, HeldBill, MedicineW
 import { calcBillOffer, calcBillTotals, round2 } from "@/lib/calc";
 import { amount, money, monthShort, stockBreakdown, todayIso, unitNoun, type SellBy } from "@/lib/format";
 import { listHeldBills, saveHeldBills } from "@/lib/store";
-import { submitBill } from "@/lib/actions";
+import { addPharmacyAtBilling, submitBill } from "@/lib/actions";
 import { Card, Pill, ScheduleBadge, ScreenHeading, Select } from "./ui";
 import { act } from "./mode-context";
-import { useSettings } from "./data";
+import { mutateAll, useSettings } from "./data";
 
 /* ==========================================================================
    Wholesale billing
@@ -99,6 +99,9 @@ export const WholesaleBilling = ({
   const [txnRef, setTxnRef] = useState("");
   const [billDate, setBillDate] = useState(todayIso());
   const [shipTo, setShipTo] = useState("");
+  /** "+ New pharmacy" form in the billing panel; null = closed */
+  const [newPharmacy, setNewPharmacy] = useState<{ name: string; phone: string; gstin: string; address: string } | null>(null);
+  const [addingPharmacy, setAddingPharmacy] = useState(false);
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const clientRef = useRef(newClientRef());
@@ -113,6 +116,23 @@ export const WholesaleBilling = ({
   }, [notice]);
 
   const customer = customers.find((c) => c.id === customerId) || null;
+
+  const savePharmacy = async () => {
+    if (!newPharmacy || addingPharmacy) return;
+    if (!newPharmacy.name.trim()) return setNotice("Enter the pharmacy name.");
+    setAddingPharmacy(true);
+    const res = await act(addPharmacyAtBilling(newPharmacy));
+    if (res.ok) {
+      // Reload the list first so the new pharmacy is there to select.
+      await mutateAll();
+      setCustomerId(res.data);
+      setShipTo(newPharmacy.address);
+      setNewPharmacy(null);
+      setCustomerQuery("");
+      setNotice(`Pharmacy added (${res.data}).`);
+    }
+    setAddingPharmacy(false);
+  };
   const customerDiscount = customer?.discount_percent ?? 0;
   const outstanding = useMemo(
     () => (customer ? round2(bills.filter((b) => b.customer_id === customer.id).reduce((s, b) => s + b.due_amount, 0)) : 0),
@@ -777,14 +797,77 @@ export const WholesaleBilling = ({
                 </div>
               </div>
             </div>
-          ) : (
-            <div className="relative">
+          ) : newPharmacy ? (
+            <div className="space-y-2 rounded-lg border border-[var(--c-primary)] bg-[var(--c-mint)]/40 p-3">
+              <p className="text-[12.5px] font-bold text-gray-900">New pharmacy</p>
               <input
-                value={customerQuery}
-                onChange={(e) => setCustomerQuery(e.target.value)}
-                placeholder="Search pharmacy name, phone, GSTIN"
+                autoFocus
+                value={newPharmacy.name}
+                onChange={(e) => setNewPharmacy({ ...newPharmacy, name: e.target.value })}
+                onKeyDown={(e) => e.key === "Enter" && savePharmacy()}
+                placeholder="Pharmacy name *"
                 className="field"
               />
+              <input
+                value={newPharmacy.phone}
+                onChange={(e) => setNewPharmacy({ ...newPharmacy, phone: e.target.value })}
+                placeholder="Phone"
+                inputMode="tel"
+                className="field"
+              />
+              <input
+                value={newPharmacy.gstin}
+                onChange={(e) => setNewPharmacy({ ...newPharmacy, gstin: e.target.value.toUpperCase() })}
+                placeholder="GSTIN"
+                className="field"
+              />
+              <textarea
+                value={newPharmacy.address}
+                onChange={(e) => setNewPharmacy({ ...newPharmacy, address: e.target.value })}
+                placeholder="Address"
+                rows={2}
+                className="field h-auto py-2"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setNewPharmacy(null)}
+                  className="flex-1 cursor-pointer rounded-lg border border-[#e3e7ea] bg-white py-2 text-[12.5px] font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={savePharmacy}
+                  disabled={addingPharmacy}
+                  className="flex-1 cursor-pointer rounded-lg bg-[var(--c-deep)] py-2 text-[12.5px] font-bold text-white hover:bg-[var(--c-hover)] disabled:cursor-wait disabled:opacity-60"
+                >
+                  {addingPharmacy ? "Saving…" : "Save & select"}
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-500">Credit limit and discount can be set later under Customers.</p>
+            </div>
+          ) : (
+            <div className="relative">
+              <div className="flex gap-2">
+                <input
+                  value={customerQuery}
+                  onChange={(e) => setCustomerQuery(e.target.value)}
+                  placeholder="Search pharmacy name, phone, GSTIN"
+                  className="field"
+                />
+                <button
+                  onClick={() =>
+                    // Start the form from what was typed: digits → phone, otherwise → name.
+                    setNewPharmacy(
+                      /^[\d\s+]+$/.test(customerQuery.trim())
+                        ? { name: "", phone: customerQuery.trim(), gstin: "", address: "" }
+                        : { name: customerQuery.trim(), phone: "", gstin: "", address: "" },
+                    )
+                  }
+                  className="flex shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-[var(--c-primary)] bg-white px-3 text-[12.5px] font-bold text-[var(--c-deep)] hover:bg-[var(--c-mint)]"
+                >
+                  <Plus className="h-4 w-4" /> New
+                </button>
+              </div>
               <div className="mt-2 max-h-[180px] overflow-y-auto rounded-lg border border-[#e5e7eb]">
                 {customerResults.map((c) => (
                   <button
@@ -804,7 +887,7 @@ export const WholesaleBilling = ({
                 ))}
                 {!customerResults.length && (
                   <p className="px-3 py-4 text-center text-[12px] text-gray-400">
-                    No customers — add one under Customers &amp; Distributors.
+                    No pharmacy found — tap <b>+ New</b> to add it.
                   </p>
                 )}
               </div>
