@@ -445,3 +445,26 @@ UPDATE "suppliers" SET "mode" = NULL WHERE "mode" IS NOT NULL;
 
 ALTER TABLE "batches" ADD COLUMN IF NOT EXISTS "source_batch_id" uuid;
 CREATE INDEX IF NOT EXISTS "batches_source_batch_idx" ON "batches" USING btree ("source_batch_id");
+
+-- ---------------------------------------------------------------------------
+-- 9. Automatic bill offers ("bill of ₹600 or more → 5% off"), per dashboard
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "bill_offers" text DEFAULT '[]' NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 10. Admin / staff login passcodes reset from Settings (hashed)
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS "login_passcodes" (
+	"role" text PRIMARY KEY NOT NULL,
+	"passcode_hash" text NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "login_passcodes_role_check" CHECK ("role" IN ('admin', 'staff'))
+);
+
+-- ---------------------------------------------------------------------------
+-- 11. Strips per box, so billing can sell by tablet, strip or box
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "batches" ADD COLUMN IF NOT EXISTS "strips_per_box" integer DEFAULT 0 NOT NULL;

@@ -18,8 +18,8 @@ import {
   Info,
 } from "lucide-react";
 import type { Batch, CartLine, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
-import { calcBillTotals, calcDiscountPercent, round2 } from "@/lib/calc";
-import { amount, money, monthShort, unitNoun, todayIso } from "@/lib/format";
+import { calcBillOffer, calcBillTotals, calcDiscountPercent, round2 } from "@/lib/calc";
+import { amount, money, monthShort, sellByOptions, stockBreakdown, unitNoun, todayIso, type SellBy } from "@/lib/format";
 import { listHeldBills, saveHeldBills } from "@/lib/store";
 import { submitBill } from "@/lib/actions";
 import { Button, Card, Pill, ScheduleBadge, ScreenHeading, Select } from "./ui";
@@ -71,6 +71,8 @@ export const Billing = ({
   const [selected, setSelected] = useState<MedicineWithBatches | null>(null);
   const [batchId, setBatchId] = useState<string>("");
   const [qty, setQty] = useState<number>(1);
+  /** What `qty` counts: single tablets / pieces, whole strips, or whole boxes */
+  const [sellBy, setSellBy] = useState<SellBy>("unit");
   const [priceOverride, setPriceOverride] = useState<number | null>(null);
   const [editingPrice, setEditingPrice] = useState(false);
 
@@ -136,9 +138,13 @@ export const Billing = ({
   const perUnit = priceOverride !== null ? priceOverride : perUnitBase;
   const mrpPerUnit = batch ? round2(batch.mrp / (batch.pack_size || 1)) : 0;
   const sellingPack = batch ? round2(perUnit * (batch.pack_size || 1)) : 0;
-  const lineAmount = round2(perUnit * qty);
+  const sellOptions = batch ? sellByOptions(batch) : [];
+  const activeSellBy = sellOptions.find((o) => o.key === sellBy) ?? sellOptions[0];
+  /** Tablets / pieces actually leaving stock: 2 boxes × 10 strips × 10 tablets = 200 */
+  const units = qty * (activeSellBy?.units ?? 1);
+  const lineAmount = round2(perUnit * units);
   const unitWord = batch ? unitNoun(batch.purchase_unit_type, batch.pack_size) : "Units";
-  const stockAfter = batch ? Math.max(0, batch.stock_qty - qty) : 0;
+  const stockAfter = batch ? Math.max(0, batch.stock_qty - units) : 0;
   const unitDiscount = round2(mrpPerUnit - perUnit);
   const unitDiscountPct = calcDiscountPercent(mrpPerUnit, perUnit);
 
@@ -146,6 +152,7 @@ export const Billing = ({
     setSelected(medicine);
     setBatchId(medicine.active_batch?.id || "");
     setQty(1);
+    setSellBy("unit");
     setPriceOverride(null);
     setEditingPrice(false);
     setQuery(`${medicine.generic_name}`);
@@ -164,16 +171,17 @@ export const Billing = ({
   /* ------------------------------- cart ops ------------------------------ */
   const addToBill = () => {
     if (!selected || !batch) return;
-    if (qty <= 0) return setNotice("Enter a quantity greater than zero.");
-    if (qty > batch.stock_qty) return setNotice(`Only ${batch.stock_qty} ${unitWord} left in this batch.`);
+    if (units <= 0) return setNotice("Enter a quantity greater than zero.");
+    if (units > batch.stock_qty)
+      return setNotice(`Only ${batch.stock_qty} ${unitWord} (${stockBreakdown(batch)}) left in this batch.`);
 
     const existingIndex = lines.findIndex((l) => l.batch_id === batch.id && l.per_unit_price === perUnit);
 
     if (existingIndex >= 0) {
       const next = [...lines];
       const merged = next[existingIndex];
-      if (merged.qty + qty > batch.stock_qty) return setNotice("Not enough stock for that quantity.");
-      next[existingIndex] = { ...merged, qty: merged.qty + qty };
+      if (merged.qty + units > batch.stock_qty) return setNotice("Not enough stock for that quantity.");
+      next[existingIndex] = { ...merged, qty: merged.qty + units };
       setLines(next);
     } else {
       setLines([
@@ -195,7 +203,7 @@ export const Billing = ({
           box: batch.box,
           purchase_unit_type: batch.purchase_unit_type,
           pack_size: batch.pack_size,
-          qty,
+          qty: units,
           mrp_per_unit: mrpPerUnit,
           per_unit_price: perUnit,
           selling_price_pack: sellingPack,
@@ -228,7 +236,8 @@ export const Billing = ({
 
   /* ------------------------------- totals -------------------------------- */
   const totals = useMemo(() => calcBillTotals(lines), [lines]);
-  const payable = round2(Math.max(0, totals.grandTotal - extraDiscount));
+  const billOffer = calcBillOffer(settings?.mode_settings.bill_offers ?? [], totals.grandTotal);
+  const payable = round2(Math.max(0, totals.grandTotal - billOffer.discount - extraDiscount));
   const receivedNum = Number(received) || 0;
   const change = round2(Math.max(0, receivedNum - payable));
 
@@ -462,6 +471,9 @@ export const Billing = ({
                   {batch.stock_qty}
                 </p>
                 <p className="text-[13px] font-semibold text-gray-700">{unitWord}</p>
+                {(batch.pack_size > 1 || batch.strips_per_box > 0) && (
+                  <p className="mt-0.5 max-w-[150px] text-[11px] text-gray-500">{stockBreakdown(batch)}</p>
+                )}
               </div>
             </div>
 
@@ -486,6 +498,23 @@ export const Billing = ({
               {/* Quantity */}
               <div className="rounded-lg border border-[#e8ebee] p-3 sm:col-span-2">
                 <p className="mb-2 text-[12.5px] font-medium text-gray-700">Quantity</p>
+                {sellOptions.length > 1 && (
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {sellOptions.map((o) => (
+                      <button
+                        key={o.key}
+                        onClick={() => setSellBy(o.key)}
+                        className={`cursor-pointer rounded-md border px-2.5 py-1 text-[12px] font-semibold transition ${
+                          activeSellBy?.key === o.key
+                            ? "border-[var(--c-primary)] bg-[var(--c-mint)] text-[var(--c-deep)]"
+                            : "border-[#dfe3e7] text-gray-700 hover:bg-gray-50"
+                        }`}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center overflow-hidden rounded-lg border border-[#dfe3e7]">
                   <button
                     onClick={() => setQty((q) => Math.max(1, q - 1))}
@@ -506,6 +535,11 @@ export const Billing = ({
                     <Plus className="h-4 w-4" />
                   </button>
                 </div>
+                {activeSellBy && activeSellBy.key !== "unit" && (
+                  <p className="mt-1.5 text-[11.5px] font-semibold text-[var(--c-deep)]">
+                    = {units} {unitWord}
+                  </p>
+                )}
                 <p className="mb-1.5 mt-2.5 text-[11.5px] text-gray-500">Quick Add</p>
                 <div className="flex flex-wrap gap-1.5">
                   {QUICK_ADD.map((n) => (
@@ -572,7 +606,7 @@ export const Billing = ({
                   {amount(lineAmount)}
                 </p>
                 <p className="mt-2 text-[11.5px] text-gray-500">
-                  {qty} × ₹{amount(perUnit)}
+                  {units} × ₹{amount(perUnit)}
                 </p>
               </div>
             </div>
@@ -594,7 +628,7 @@ export const Billing = ({
               <div>
                 <p className="text-[11px] text-gray-500">You are selling</p>
                 <p className="text-[13px] font-bold text-gray-900">
-                  {qty} {unitWord}
+                  {units} {unitWord}
                 </p>
               </div>
               <div>
@@ -610,7 +644,7 @@ export const Billing = ({
               <div>
                 <p className="text-[11px] text-gray-500">Discount</p>
                 <p className="text-[13px] font-bold text-[var(--c-deep)]">
-                  {amount(round2(unitDiscount * qty))} ({unitDiscountPct.toFixed(0)}%)
+                  {amount(round2(unitDiscount * units))} ({unitDiscountPct.toFixed(0)}%)
                 </p>
               </div>
               <button
@@ -741,7 +775,9 @@ export const Billing = ({
                   <p className="mb-1.5 flex items-start gap-1.5 text-[11.5px] leading-snug text-gray-500">
                     <Info className="mt-[1px] h-3.5 w-3.5 shrink-0 text-[#1f6feb]" />
                     MRP-to-selling discount of {money(totals.discount)} is already applied
-                    automatically. Add an extra discount below if needed.
+                    automatically
+                    {billOffer.offer ? `, plus the ${billOffer.offer.percent}% bill offer (${money(billOffer.discount)})` : ""}.
+                    Add an extra discount below if needed.
                   </p>
                   <input
                     type="number"
@@ -793,9 +829,21 @@ export const Billing = ({
               value={money(round2(totals.discount + extraDiscount))}
               tone={totals.discount + extraDiscount > 0 ? "green" : undefined}
             />
+            {billOffer.offer && (
+              <Row
+                label={`Bill offer (${billOffer.offer.percent}% on ₹${amount(billOffer.offer.min_amount)}+)`}
+                value={`− ${money(billOffer.discount)}`}
+                tone="green"
+              />
+            )}
             <Row label="Taxable Amount" value={money(totals.taxableAmount)} />
             <Row label={`GST (${totals.gstPercent || 0}%)`} value={money(totals.gstAmount)} />
           </div>
+          {billOffer.next && (
+            <p className="mt-3 rounded-lg bg-[var(--c-mint)] px-3 py-2 text-[11.5px] font-medium text-[var(--c-deep)]">
+              Add {money(billOffer.next.short_by)} more to get {billOffer.next.percent}% off this bill.
+            </p>
+          )}
 
           <div className="mt-4 flex items-center justify-between border-t border-[#eef1f3] pt-4">
             <span className="text-[16px] font-bold text-gray-900">TOTAL</span>

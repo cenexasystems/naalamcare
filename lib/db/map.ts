@@ -3,6 +3,7 @@ import type {
   Bill,
   BillItem,
   Customer,
+  BillOffer,
   DiscountTier,
   Medicine,
   ModeSettings,
@@ -68,6 +69,7 @@ export const mapBatch = (row: any): Batch => ({
   box: row.box,
   purchase_unit_type: row.purchaseUnitType as any,
   pack_size: row.packSize,
+  strips_per_box: row.stripsPerBox ?? 0,
   qty_packs: row.qtyPacks,
   stock_added: row.stockAdded,
   stock_qty: row.stockQty,
@@ -206,6 +208,10 @@ export const mapModeSettings = (row: any, mode: Mode): ModeSettings => ({
     .map((t) => ({ min_packs: toNum(t.min_packs), percent: toNum(t.percent) }))
     .filter((t) => t.min_packs > 0 && t.percent > 0)
     .sort((a, b) => a.min_packs - b.min_packs),
+  bill_offers: parseJson<BillOffer[]>(row?.billOffers, [])
+    .map((o) => ({ min_amount: toNum(o.min_amount), percent: toNum(o.percent) }))
+    .filter((o) => o.min_amount > 0 && o.percent > 0)
+    .sort((a, b) => a.min_amount - b.min_amount),
   enforce_moq: Boolean(row?.enforceMoq ?? mode === "wholesale"),
   invoice_terms: row?.invoiceTerms ?? "",
   gstin: row?.gstin ?? "",

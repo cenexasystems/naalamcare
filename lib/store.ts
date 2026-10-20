@@ -170,6 +170,7 @@ const buildSeed = (): Store => {
       box: row.box,
       purchase_unit_type: row.unitType,
       pack_size: row.packSize,
+      strips_per_box: 0,
       qty_packs: row.qtyPacks,
       stock_added: row.packSize * row.qtyPacks,
       stock_qty: row.stockLeft,

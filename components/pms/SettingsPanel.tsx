@@ -11,7 +11,7 @@ import {
 import { THEMES, THEME_KEYS, resolveTheme } from "@/lib/format";
 import { deleteSupplier, saveSettings, saveSupplier } from "@/lib/actions";
 import { act, useMode, useModeState } from "./mode-context";
-import { ModeSettingsCard, ReconciliationCard, UsersCard } from "./SettingsExtras";
+import { LoginPasscodesCard, ModeSettingsCard, ReconciliationCard, UsersCard } from "./SettingsExtras";
 import { downloadBlob } from "@/lib/xlsx";
 import { Button, Card, Field, Modal, PageTitle, TextInput } from "./ui";
 
@@ -382,6 +382,8 @@ export const SettingsPanel = ({
       {initialSettings && (
         <ModeSettingsCard key={mode} settings={initialSettings.mode_settings} onChanged={onChanged} />
       )}
+
+      {isAdmin && <LoginPasscodesCard onChanged={onChanged} />}
 
       {isAdmin && <UsersCard onChanged={onChanged} />}
 

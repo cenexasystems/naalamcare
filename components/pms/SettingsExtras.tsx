@@ -2,10 +2,19 @@
 
 import React, { useMemo, useState } from "react";
 import { Save, Plus, Trash2, GitMerge, Pencil } from "lucide-react";
-import type { DiscountTier, ModeSettings, PaymentMethod } from "@/lib/types";
+import type { BillOffer, DiscountTier, ModeSettings, PaymentMethod } from "@/lib/types";
 import { MODE_LABEL, type Mode } from "@/lib/mode";
 import { amount, monthShort } from "@/lib/format";
-import { classifyLegacyRecords, deleteUser, listUsers, saveModeSettings, saveUser, type AppUser } from "@/lib/actions";
+import {
+  classifyLegacyRecords,
+  deleteUser,
+  getLoginPasscodeStatus,
+  listUsers,
+  resetLoginPasscode,
+  saveModeSettings,
+  saveUser,
+  type AppUser,
+} from "@/lib/actions";
 import { Button, Card, Field, Modal, Pill, Select, TextInput } from "./ui";
 import { act, useMode, useModeState } from "./mode-context";
 import { useReconciliation } from "./data";
@@ -44,6 +53,7 @@ export const ModeSettingsCard = ({
     invoice_terms: settings.invoice_terms,
   }));
   const [tiers, setTiers] = useState<DiscountTier[]>(settings.bulk_discount_tiers);
+  const [offers, setOffers] = useState<BillOffer[]>(settings.bill_offers);
   const [saving, setSaving] = useState(false);
 
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
@@ -61,6 +71,7 @@ export const ModeSettingsCard = ({
         ...draft,
         payment_methods: draft.allow_credit ? [...draft.payment_methods, "Credit"] : draft.payment_methods,
         bulk_discount_tiers: tiers,
+        bill_offers: offers,
       }),
     );
     setSaving(false);
@@ -138,6 +149,50 @@ export const ModeSettingsCard = ({
           </div>
         </Field>
       </div>
+
+      <Field
+        label="Automatic bill offers"
+        className="mt-4"
+        hint="Applied by itself at billing once the bill total reaches the amount. If several match, the biggest % is given."
+      >
+        <div className="space-y-2">
+          {offers.map((o, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2 text-[13px] text-gray-700">
+              <span>Bill of ₹</span>
+              <TextInput
+                type="number"
+                value={o.min_amount || ""}
+                onChange={(e) =>
+                  setOffers(offers.map((x, n) => (n === i ? { ...x, min_amount: Number(e.target.value) || 0 } : x)))
+                }
+                placeholder="600"
+                className="w-[110px]"
+              />
+              <span>or more →</span>
+              <TextInput
+                type="number"
+                value={o.percent || ""}
+                onChange={(e) =>
+                  setOffers(offers.map((x, n) => (n === i ? { ...x, percent: Number(e.target.value) || 0 } : x)))
+                }
+                placeholder="5"
+                className="w-[80px]"
+              />
+              <span>% off</span>
+              <button
+                onClick={() => setOffers(offers.filter((_, n) => n !== i))}
+                aria-label="Remove offer"
+                className="cursor-pointer rounded-md p-2 text-gray-500 hover:bg-red-50 hover:text-red-600"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+          <Button variant="ghost" className="py-2 text-[13px]" onClick={() => setOffers([...offers, { min_amount: 0, percent: 0 }])}>
+            <Plus className="h-4 w-4" /> Add offer
+          </Button>
+        </div>
+      </Field>
 
       {wholesale && (
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -365,6 +420,106 @@ export const ReconciliationCard = ({ onChanged }: { onChanged: (message?: string
    staff account is given Retail, Wholesale or both dashboards.
    ------------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------------
+   Login passcodes — reset the built-in admin and shared staff passcodes.
+   (Passcodes of individual user accounts are reset under Users & Access.)
+   ------------------------------------------------------------------------ */
+
+const PASSCODE_ROLES = [
+  { role: "admin", title: "Admin passcode", hint: "Opens both dashboards with full admin rights." },
+  { role: "staff", title: "Staff passcode", hint: "The shared staff login (not individual user accounts)." },
+] as const;
+
+export const LoginPasscodesCard = ({ onChanged }: { onChanged: (message?: string) => void }) => {
+  const [status, setStatus] = useState<{ admin: boolean; staff: boolean } | null>(null);
+  const [drafts, setDrafts] = useState({ admin: { next: "", confirm: "" }, staff: { next: "", confirm: "" } });
+  const [saving, setSaving] = useState<"admin" | "staff" | null>(null);
+  const [error, setError] = useState<{ role: "admin" | "staff"; text: string } | null>(null);
+
+  const load = React.useCallback(() => {
+    getLoginPasscodeStatus()
+      .then((res) => res.ok && setStatus(res.data))
+      .catch(() => setStatus(null));
+  }, []);
+  React.useEffect(load, [load]);
+
+  const reset = async (role: "admin" | "staff", passcode: string | null) => {
+    setError(null);
+    if (passcode !== null) {
+      const { next, confirm } = drafts[role];
+      if (next.trim().length < 4) return setError({ role, text: "Use at least 4 characters." });
+      if (next !== confirm) return setError({ role, text: "The two passcodes don't match." });
+    }
+    setSaving(role);
+    const res = await act(resetLoginPasscode({ role, passcode }));
+    setSaving(null);
+    if (!res.ok) return;
+    setDrafts({ ...drafts, [role]: { next: "", confirm: "" } });
+    load();
+    const label = role === "admin" ? "Admin" : "Staff";
+    onChanged(passcode === null ? `${label} passcode set back to the server value.` : `${label} passcode changed.`);
+  };
+
+  return (
+    <Card className="mt-4 p-5">
+      <h3 className="mb-1 text-[15px] font-bold text-gray-900">Login Passcodes</h3>
+      <p className="mb-4 text-[12px] text-gray-500">
+        Reset the passcodes used on the login page. The old passcode stops working as soon as you save. To reset a
+        passcode for one person&rsquo;s own account, edit them under Users &amp; Access below.
+      </p>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {PASSCODE_ROLES.map(({ role, title, hint }) => (
+          <div key={role} className="rounded-lg border border-[#e5e7eb] p-4">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <p className="text-[13.5px] font-bold text-gray-900">{title}</p>
+              {status && (
+                <Pill tone={status[role] ? "green" : "gray"}>{status[role] ? "Changed in Settings" : "Server default"}</Pill>
+              )}
+            </div>
+            <p className="mb-3 text-[11.5px] text-gray-500">{hint}</p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <TextInput
+                type="password"
+                autoComplete="new-password"
+                value={drafts[role].next}
+                onChange={(e) => setDrafts({ ...drafts, [role]: { ...drafts[role], next: e.target.value } })}
+                placeholder="New passcode"
+              />
+              <TextInput
+                type="password"
+                autoComplete="new-password"
+                value={drafts[role].confirm}
+                onChange={(e) => setDrafts({ ...drafts, [role]: { ...drafts[role], confirm: e.target.value } })}
+                placeholder="Repeat new passcode"
+              />
+            </div>
+            {error?.role === role && <p className="mt-2 text-[12px] font-semibold text-red-600">{error.text}</p>}
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              {status?.[role] && (
+                <Button
+                  variant="ghost"
+                  className="py-2 text-[12.5px]"
+                  disabled={saving !== null}
+                  onClick={() => reset(role, null)}
+                >
+                  Use server default
+                </Button>
+              )}
+              <Button
+                className="py-2 text-[12.5px]"
+                disabled={saving !== null || !drafts[role].next}
+                onClick={() => reset(role, drafts[role].next)}
+              >
+                <Save className="h-4 w-4" /> {saving === role ? "Saving…" : "Reset passcode"}
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+};
+
 type UserDraft = { id?: string; name: string; role: "admin" | "staff"; modes: Mode[]; active: boolean; passcode: string };
 
 export const UsersCard = ({ onChanged }: { onChanged: (message?: string) => void }) => {
@@ -466,7 +621,7 @@ export const UsersCard = ({ onChanged }: { onChanged: (message?: string) => void
             {users !== null && !users.length && (
               <tr>
                 <td colSpan={5} className="px-4 py-10 text-center text-[13px] text-gray-400">
-                  No user accounts yet. The admin passcode from the server settings always works.
+                  No user accounts yet. The admin passcode (see Login Passcodes above) always works.
                 </td>
               </tr>
             )}

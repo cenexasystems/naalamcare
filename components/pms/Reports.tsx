@@ -264,7 +264,7 @@ export const Reports = ({
                 <th className="th">S.No</th>
                 <th className="th">Bill No</th>
                 <th className="th">Sale Date</th>
-                <th className="th">Customer</th>
+                <th className="th">{mode === "wholesale" ? "Pharmacy Name" : "Customer"}</th>
                 <th className="th">Mobile</th>
                 <th className="th text-center">Items</th>
                 <th className="th text-right">Discount</th>
@@ -351,7 +351,7 @@ export const Reports = ({
           <>
             <div className="mb-4 flex flex-wrap gap-x-6 gap-y-1 rounded-xl bg-[#fafbfc] px-4 py-3 text-[13px]">
               <span>
-                <b>Customer:</b> {viewing.customer_name || "Walk-in Customer"}
+                <b>{mode === "wholesale" ? "Pharmacy Name" : "Customer"}:</b> {viewing.customer_name || "Walk-in Customer"}
               </span>
               <span>
                 <b>Phone:</b> {viewing.customer_phone || "—"}

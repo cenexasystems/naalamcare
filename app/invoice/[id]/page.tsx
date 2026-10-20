@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { applyModeShopDetails, getBill, getModeSettings, getSettings } from "@/lib/db/queries";
-import { getSession } from "@/lib/auth";
+import { billShareToken, getSession, isValidBillShareToken } from "@/lib/auth";
 import { APP_NAME } from "@/lib/mode";
 import { amount, amountInWords, dateSlash, monthShort, money } from "@/lib/format";
 import type { Bill, BillItem } from "@/lib/types";
@@ -61,14 +61,24 @@ const gstOf = (item: BillItem): number => {
 
 const DEFAULT_TERMS = ["Goods once sold will not be taken back.", "Please check Batch No, Qty, Exp before taking delivery."];
 
-export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function InvoicePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const { id: rawId } = await params;
   const id = decodeURIComponent(rawId);
+  const { t: shareToken } = await searchParams;
   const session = await getSession();
-  const found = session ? await getBill(id) : null;
+  // A customer opening the link we sent them (WhatsApp) carries a signed token for this bill only.
+  const sharedView = !session && isValidBillShareToken(id, shareToken);
+  const found = session || sharedView ? await getBill(id) : null;
   // Invoices are business records: only a signed-in user with access to the
-  // bill's dashboard may open one. Anything else reads as "not found".
-  const bill = found && found.mode && session?.modes.includes(found.mode) ? found : null;
+  // bill's dashboard (or a valid share link) may open one. Anything else reads as "not found".
+  const bill = found && found.mode && (sharedView || session?.modes.includes(found.mode)) ? found : null;
+  const sharePath = bill ? `/invoice/${encodeURIComponent(bill.id)}?t=${billShareToken(bill.id)}` : "";
   const modeSettings = bill?.mode ? await getModeSettings(bill.mode) : null;
   // Retail and wholesale each print their own shop name, address, phones, GSTIN and licence.
   const shopWide = await getSettings();
@@ -79,7 +89,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
     .map((t) => t.trim())
     .filter(Boolean);
 
-  if (!session) {
+  if (!session && !sharedView) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-white px-4 text-center">
         <p className="text-xl font-bold text-[var(--c-deep)]">Please log in</p>
@@ -131,7 +141,12 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       `}</style>
 
       <div className="mb-5 flex w-full max-w-3xl justify-end no-print">
-        <InvoiceActions />
+        <InvoiceActions
+          sharePath={sharePath}
+          canShare={!sharedView}
+          phone={bill.customer_phone}
+          message={`${shop?.shop_name || APP_NAME} — Invoice ${bill.id} dated ${dateSlash(bill.bill_date)}, amount ${money(bill.grand_total)}.`}
+        />
       </div>
 
       <div className="invoice-sheet w-full max-w-[210mm] bg-white p-4 text-black shadow-sm print:p-0">
@@ -152,7 +167,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         {/* ---------- Tax Invoice banner + invoice meta ---------- */}
         <div className="flex items-start justify-between gap-4 border-b border-black py-1.5 text-[10.5px]">
           <div className="w-[34%]">
-            <p>Customer Name : <span className="font-bold">{bill.customer_name || ""}</span></p>
+            <p>{wholesale ? "Pharmacy Name" : "Customer Name"} : <span className="font-bold">{bill.customer_name || ""}</span></p>
             <p className="mt-3">Mob : {bill.customer_phone || ""}</p>
             <p>Cust. ID : {bill.customer_id || ""}</p>
             <p>Email : {bill.customer_email}</p>

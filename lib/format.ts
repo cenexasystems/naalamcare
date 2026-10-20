@@ -240,3 +240,43 @@ export const packNoun = (unitType: string): string => {
   if (unitType === "Bottle") return "Bottles";
   return "Pieces";
 };
+
+/** What a billing quantity counts: single units, whole packs (strips) or whole boxes. */
+export type SellBy = "unit" | "pack" | "box";
+
+type PackInfo = { purchase_unit_type: string; pack_size: number; strips_per_box: number };
+
+/** The ways a batch can be sold, with how many units (tablets / pieces) each one is. */
+export const sellByOptions = (b: PackInfo): { key: SellBy; label: string; units: number }[] => {
+  const pack = b.pack_size || 1;
+  const perBox = Math.max(0, b.strips_per_box || 0);
+  const packs = packNoun(b.purchase_unit_type);
+  const options: { key: SellBy; label: string; units: number }[] = [
+    { key: "unit", label: unitNoun(b.purchase_unit_type, pack), units: 1 },
+  ];
+  if (pack > 1) options.push({ key: "pack", label: `${packs} (${pack} each)`, units: pack });
+  if (perBox > 0) options.push({ key: "box", label: `Boxes (${perBox} ${packs.toLowerCase()})`, units: pack * perBox });
+  return options;
+};
+
+/** Stock in units as boxes + strips + loose units, e.g. "2 boxes + 3 strips + 4 tablets". */
+export const stockBreakdown = (b: PackInfo & { stock_qty: number }): string => {
+  const pack = b.pack_size || 1;
+  const perBox = Math.max(0, b.strips_per_box || 0);
+  let left = Math.max(0, b.stock_qty);
+  const parts: string[] = [];
+  const add = (n: number, one: string, many: string) => n > 0 && parts.push(`${n} ${n === 1 ? one : many}`);
+  if (perBox > 0) {
+    const boxes = Math.floor(left / (pack * perBox));
+    add(boxes, "box", "boxes");
+    left -= boxes * pack * perBox;
+  }
+  if (pack > 1) {
+    const packs = Math.floor(left / pack);
+    const noun = packNoun(b.purchase_unit_type).toLowerCase();
+    add(packs, noun.replace(/s$/, ""), noun);
+    left -= packs * pack;
+  }
+  add(left, unitNoun(b.purchase_unit_type, 1).toLowerCase(), unitNoun(b.purchase_unit_type, 2).toLowerCase());
+  return parts.join(" + ") || "0";
+};

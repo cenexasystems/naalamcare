@@ -154,7 +154,7 @@ export const Payments = ({
                   <tr className="bg-[#f4f6f8] text-gray-700">
                     <th className="th">Invoice</th>
                     <th className="th">Date</th>
-                    <th className="th">Customer</th>
+                    <th className="th">{mode === "wholesale" ? "Pharmacy Name" : "Customer"}</th>
                     <th className="th">Payment</th>
                     <th className="th text-right">Total</th>
                     <th className="th text-right">Paid</th>
@@ -242,7 +242,7 @@ export const Payments = ({
               <thead>
                 <tr className="bg-[#f4f6f8] text-gray-700">
                   <th className="th">Date</th>
-                  <th className="th">Customer</th>
+                  <th className="th">{mode === "wholesale" ? "Pharmacy Name" : "Customer"}</th>
                   <th className="th">Invoice</th>
                   <th className="th">Method</th>
                   <th className="th">Reference</th>

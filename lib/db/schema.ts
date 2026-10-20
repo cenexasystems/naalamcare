@@ -85,6 +85,8 @@ export const batches = pgTable(
     box: text("box").notNull().default(""),
     purchaseUnitType: text("purchase_unit_type").notNull(),
     packSize: integer("pack_size").notNull().default(1),
+    /** Packs (strips) in one box; 0 = not sold by the box */
+    stripsPerBox: integer("strips_per_box").notNull().default(0),
     qtyPacks: integer("qty_packs").notNull().default(0),
     stockAdded: integer("stock_added").notNull().default(0),
     stockQty: integer("stock_qty").notNull().default(0),
@@ -255,6 +257,8 @@ export const modeSettings = pgTable("mode_settings", {
   maxDiscountPercent: numeric("max_discount_percent", { precision: 5, scale: 2 }).notNull().default("0"),
   /** JSON: [{ "min_packs": 50, "percent": 2 }] — wholesale quantity discounts */
   bulkDiscountTiers: text("bulk_discount_tiers").notNull().default("[]"),
+  /** JSON: [{ "min_amount": 600, "percent": 5 }] — automatic % off once the bill reaches the amount */
+  billOffers: text("bill_offers").notNull().default("[]"),
   enforceMoq: boolean("enforce_moq").notNull().default(false),
   /** Printed under "Terms & Conditions" on this mode's invoices; one per line. */
   invoiceTerms: text("invoice_terms").notNull().default(""),
@@ -400,4 +404,15 @@ export const appUsers = pgTable("app_users", {
   modes: text("modes").notNull().default("retail,wholesale"),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* --------------------------------------------------------------------------
+   Built-in login passcodes changed from Settings → Login passcodes.
+   One row per role ("admin", "staff"); a row replaces the ADMIN_PASSCODE /
+   STAFF_PASSCODE environment value. No row = the environment value works.
+   -------------------------------------------------------------------------- */
+export const loginPasscodes = pgTable("login_passcodes", {
+  role: text("role").primaryKey(),
+  passcodeHash: text("passcode_hash").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

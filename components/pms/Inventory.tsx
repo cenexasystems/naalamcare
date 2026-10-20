@@ -22,7 +22,7 @@ import {
   ArrowLeftRight,
 } from "lucide-react";
 import type { Batch, BatchRow, DrugSchedule, Medicine, MedicineWithBatches, PurchaseUnitType, StockMovement } from "@/lib/types";
-import { amount, dateSlash, expiryState, monthSlash, scheduleLabel, timeLabel, unitNoun } from "@/lib/format";
+import { amount, dateSlash, expiryState, monthSlash, packNoun, scheduleLabel, timeLabel, unitNoun } from "@/lib/format";
 import { adjustStock, deleteBatch, deleteMedicine, getBatchMovements, saveBatch, saveMedicine, transferStock } from "@/lib/actions";
 import { act, useMode, useModeState } from "./mode-context";
 import { useReconciliation } from "./data";
@@ -786,6 +786,13 @@ const EditBatchModal = ({
             type="number"
             value={draft.pack_size}
             onChange={(e) => set({ pack_size: Number(e.target.value) || 0 })}
+          />
+        </Field>
+        <Field label={`${packNoun(draft.purchase_unit_type)} per box`} hint="Blank = not sold by the box">
+          <TextInput
+            type="number"
+            value={draft.strips_per_box || ""}
+            onChange={(e) => set({ strips_per_box: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
           />
         </Field>
         <Field label="Purchase Rate (₹)">

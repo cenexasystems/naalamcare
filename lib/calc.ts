@@ -84,6 +84,42 @@ export const calcTaxableValue = (
   gstPercent: number | string,
 ): number => round2(num(inclusiveAmount) - calcIncludedGst(inclusiveAmount, gstPercent));
 
+export type AppliedOffer = {
+  /** The offer the bill qualifies for, or null when it reaches none */
+  offer: { min_amount: number; percent: number } | null;
+  discount: number;
+  /** The next bigger offer and how much more the bill needs to reach it */
+  next: { min_amount: number; percent: number; short_by: number } | null;
+};
+
+/**
+ * Bill-amount offer, applied automatically: "bill of ₹600 or more → 5% off".
+ * The bill qualifies once its amount (after per-line discounts) reaches the
+ * minimum; when several qualify, the biggest % wins.
+ */
+export const calcBillOffer = (
+  offers: { min_amount: number; percent: number }[],
+  billAmount: number,
+): AppliedOffer => {
+  const amount = num(billAmount);
+  let offer: AppliedOffer["offer"] = null;
+  let next: AppliedOffer["next"] = null;
+  for (const o of offers) {
+    if (o.min_amount <= 0 || o.percent <= 0) continue;
+    if (amount >= o.min_amount) {
+      if (!offer || o.percent > offer.percent) offer = o;
+    } else if (!next || o.min_amount < next.min_amount) {
+      next = { ...o, short_by: round2(o.min_amount - amount) };
+    }
+  }
+  if (next && offer && next.percent <= offer.percent) next = null;
+  return {
+    offer,
+    discount: offer && amount > 0 ? round2((amount * Math.min(100, offer.percent)) / 100) : 0,
+    next: amount > 0 ? next : null,
+  };
+};
+
 export type BillTotals = {
   subTotal: number;
   discount: number;

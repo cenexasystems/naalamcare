@@ -16,8 +16,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { Batch, Bill, CartLine, Customer, DiscountTier, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
-import { calcBillTotals, round2 } from "@/lib/calc";
-import { amount, money, monthShort, todayIso, unitNoun } from "@/lib/format";
+import { calcBillOffer, calcBillTotals, round2 } from "@/lib/calc";
+import { amount, money, monthShort, stockBreakdown, todayIso, unitNoun, type SellBy } from "@/lib/format";
 import { listHeldBills, saveHeldBills } from "@/lib/store";
 import { submitBill } from "@/lib/actions";
 import { Card, Pill, ScheduleBadge, ScreenHeading, Select } from "./ui";
@@ -88,7 +88,7 @@ export const WholesaleBilling = ({
   const [selected, setSelected] = useState<MedicineWithBatches | null>(null);
   const [batchId, setBatchId] = useState("");
   const [qty, setQty] = useState(1);
-  const [unit, setUnit] = useState<"pack" | "unit">("pack");
+  const [unit, setUnit] = useState<SellBy>("pack");
 
   /* ------------------------------ bill state ----------------------------- */
   const [lines, setLines] = useState<CartLine[]>([]);
@@ -160,7 +160,9 @@ export const WholesaleBilling = ({
   }, [selected, batchId]);
 
   const packSize = batch?.pack_size || 1;
-  const units = unit === "pack" ? qty * packSize : qty;
+  const boxUnits = batch && batch.strips_per_box > 0 ? packSize * batch.strips_per_box : 0;
+  // 2 boxes × 10 strips × 10 tablets = 200 tablets leave stock
+  const units = unit === "box" && boxUnits ? qty * boxUnits : unit === "unit" ? qty : qty * packSize;
   const packs = units / packSize;
   const linePct = round2(customerDiscount + tierPercent(tiers, packs));
   const ratePack = batch ? round2(batch.selling_price * (1 - linePct / 100)) : 0;
@@ -196,7 +198,7 @@ export const WholesaleBilling = ({
     if (units <= 0) return setNotice("Enter a quantity greater than zero.");
     const inCart = lines.filter((l) => l.batch_id === batch.id).reduce((s, l) => s + l.qty, 0);
     if (units + inCart > batch.stock_qty)
-      return setNotice(`Only ${batch.stock_qty} units (${Math.floor(batch.stock_qty / packSize)} packs) in this batch.`);
+      return setNotice(`Only ${batch.stock_qty} units (${stockBreakdown(batch)}) in this batch.`);
 
     const existing = lines.findIndex((l) => l.batch_id === batch.id);
     if (existing >= 0) {
@@ -262,9 +264,11 @@ export const WholesaleBilling = ({
     [lines, customerDiscount, tiers],
   );
   const totals = useMemo(() => calcBillTotals(priced), [priced]);
+  const billOffer = calcBillOffer(ms?.bill_offers ?? [], totals.grandTotal);
+  const payable = round2(totals.grandTotal - billOffer.discount);
   const receivedNum = Number(received) || 0;
   const isCredit = payment === "Credit";
-  const dueNow = isCredit ? round2(Math.max(0, totals.grandTotal - receivedNum)) : 0;
+  const dueNow = isCredit ? round2(Math.max(0, payable - receivedNum)) : 0;
   const creditDays = customer?.credit_days || ms?.default_credit_days || 0;
   const dueDate = isCredit ? addDays(billDate, creditDays) : "";
   const creditLimit = customer?.credit_limit ?? 0;
@@ -305,10 +309,10 @@ export const WholesaleBilling = ({
   const checkout = async () => {
     if (submitting) return;
     if (!lines.length) return setNotice("Add at least one medicine to the bill.");
-    if (!customer) return setNotice("Select the business customer first.");
+    if (!customer) return setNotice("Select the pharmacy first.");
     if (moqProblems.length) return setNotice(`Minimum order not met — ${moqProblems[0]}.`);
     if (overLimit) return setNotice("This bill would take the customer over their credit limit.");
-    if (!isCredit && receivedNum > 0 && receivedNum < totals.grandTotal)
+    if (!isCredit && receivedNum > 0 && receivedNum < payable)
       return setNotice("For a part payment, choose Credit as the payment method.");
 
     setSubmitting(true);
@@ -325,7 +329,7 @@ export const WholesaleBilling = ({
           doctor_name: "",
           shipping_address: shipTo || customer.shipping_address,
           txn_ref: txnRef,
-          received_amount: isCredit ? receivedNum : receivedNum || totals.grandTotal,
+          received_amount: isCredit ? receivedNum : receivedNum || payable,
           payment_method: payment,
           bill_date: billDate,
           lines: priced.map((l) => ({ batch_id: l.batch_id, qty: l.qty, per_unit_price: l.per_unit_price })),
@@ -512,7 +516,7 @@ export const WholesaleBilling = ({
                 <div className="mb-2 flex items-center justify-between">
                   <p className="text-[12.5px] font-medium text-gray-700">Quantity</p>
                   <div className="flex overflow-hidden rounded-md border border-[#dfe3e7] text-[11.5px] font-semibold">
-                    {(["pack", "unit"] as const).map((u) => (
+                    {(boxUnits ? (["box", "pack", "unit"] as const) : (["pack", "unit"] as const)).map((u) => (
                       <button
                         key={u}
                         onClick={() => setUnit(u)}
@@ -520,7 +524,11 @@ export const WholesaleBilling = ({
                           unit === u ? "bg-[var(--c-deep)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"
                         }`}
                       >
-                        {u === "pack" ? `${batch.purchase_unit_type}s` : unitNoun(batch.purchase_unit_type, packSize)}
+                        {u === "box"
+                          ? `Boxes (${batch.strips_per_box})`
+                          : u === "pack"
+                            ? `${batch.purchase_unit_type}s`
+                            : unitNoun(batch.purchase_unit_type, packSize)}
                       </button>
                     ))}
                   </div>
@@ -580,6 +588,7 @@ export const WholesaleBilling = ({
                 <p className="mb-2 text-[12.5px] font-medium text-gray-700">Amount (₹)</p>
                 <p className="text-[26px] font-extrabold leading-none text-[var(--c-deep)]">{amount(lineValue)}</p>
                 <p className="mt-2 text-[11.5px] text-gray-500">
+                  {unit === "box" && `${qty} box${qty === 1 ? "" : "es"} = `}
                   {round2(packs)} {batch.purchase_unit_type}s = {units} {unitNoun(batch.purchase_unit_type, packSize)}
                 </p>
               </div>
@@ -736,7 +745,7 @@ export const WholesaleBilling = ({
       <section className="xl:col-span-3">
         <Card className="p-4">
           <h3 className="mb-3 flex items-center gap-2 text-[14px] font-bold uppercase tracking-wide text-[var(--c-deep)]">
-            <Building2 className="h-4 w-4" /> Customer
+            <Building2 className="h-4 w-4" /> Pharmacy
           </h3>
           {customer ? (
             <div className="rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3 text-[12.5px]">
@@ -773,7 +782,7 @@ export const WholesaleBilling = ({
               <input
                 value={customerQuery}
                 onChange={(e) => setCustomerQuery(e.target.value)}
-                placeholder="Search business, phone, GSTIN"
+                placeholder="Search pharmacy name, phone, GSTIN"
                 className="field"
               />
               <div className="mt-2 max-h-[180px] overflow-y-auto rounded-lg border border-[#e5e7eb]">
@@ -805,13 +814,25 @@ export const WholesaleBilling = ({
           <div className="mt-4 space-y-2.5 text-[13px]">
             <Row label={`Sub Total (MRP, ${totals.itemCount} items)`} value={money(totals.subTotal)} />
             <Row label="Discount" value={money(totals.discount)} green />
+            {billOffer.offer && (
+              <Row
+                label={`Bill offer (${billOffer.offer.percent}% on ₹${amount(billOffer.offer.min_amount)}+)`}
+                value={`− ${money(billOffer.discount)}`}
+                green
+              />
+            )}
             <Row label="Taxable Amount" value={money(totals.taxableAmount)} />
             <Row label={`GST (${totals.gstPercent || 0}%)`} value={money(totals.gstAmount)} />
           </div>
+          {billOffer.next && (
+            <p className="mt-3 rounded-lg bg-[var(--c-mint)] px-3 py-2 text-[11.5px] font-medium text-[var(--c-deep)]">
+              Add {money(billOffer.next.short_by)} more to get {billOffer.next.percent}% off this bill.
+            </p>
+          )}
 
           <div className="mt-4 flex items-center justify-between border-t border-[#eef1f3] pt-4">
             <span className="text-[16px] font-bold text-gray-900">TOTAL</span>
-            <span className="text-[24px] font-extrabold text-[var(--c-deep)]">{money(totals.grandTotal)}</span>
+            <span className="text-[24px] font-extrabold text-[var(--c-deep)]">{money(payable)}</span>
           </div>
 
           <div className="mt-4 space-y-3">
@@ -835,7 +856,7 @@ export const WholesaleBilling = ({
                 type="number"
                 value={received}
                 onChange={(e) => setReceived(e.target.value)}
-                placeholder={isCredit ? "0.00" : amount(totals.grandTotal)}
+                placeholder={isCredit ? "0.00" : amount(payable)}
                 className="h-9 w-[130px] rounded-lg border border-[#d8dde3] px-2.5 text-right text-[13px] font-semibold outline-none focus:border-[var(--c-primary)]"
               />
             </div>

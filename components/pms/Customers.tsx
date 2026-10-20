@@ -128,7 +128,7 @@ export const Customers = ({
               <tr className="bg-[#f4f6f8] text-gray-700">
                 <th className="th">S.No</th>
                 <th className="th">Customer ID</th>
-                <th className="th">Name</th>
+                <th className="th">{wholesale ? "Pharmacy Name" : "Name"}</th>
                 <th className="th">Phone</th>
                 <th className="th">Address</th>
                 <th className="th">{wholesale ? "Type" : "Doctor"}</th>
@@ -489,11 +489,11 @@ const CustomerFormModal = ({
       }
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label={wholesale ? "Business Name" : "Customer Name"}>
+        <Field label={wholesale ? "Pharmacy Name" : "Customer Name"}>
           <TextInput
             value={draft.name}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-            placeholder={wholesale ? "Enter business name" : "Enter customer name"}
+            placeholder={wholesale ? "Enter pharmacy name" : "Enter customer name"}
           />
         </Field>
         <Field label="Phone Number">

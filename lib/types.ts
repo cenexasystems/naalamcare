@@ -85,6 +85,8 @@ export type Batch = {
   purchase_unit_type: PurchaseUnitType;
   /** Numeric "Purchase Unit" — units per pack */
   pack_size: number;
+  /** Packs (strips) in one box; 0 = not sold by the box */
+  strips_per_box: number;
   /** Number of packs purchased */
   qty_packs: number;
   /** pack_size x qty_packs */
@@ -297,6 +299,9 @@ export type BatchRow = { batch: Batch; medicine: Medicine; supplier_name: string
 /** Wholesale quantity discount: `percent` off once a line reaches `min_packs`. */
 export type DiscountTier = { min_packs: number; percent: number };
 
+/** Bill offer: `percent` off the whole bill once it reaches `min_amount` (₹). */
+export type BillOffer = { min_amount: number; percent: number };
+
 /** Settings that differ between the retail and wholesale dashboards. */
 export type ModeSettings = {
   mode: Mode;
@@ -311,6 +316,8 @@ export type ModeSettings = {
   /** Cap on manual bill discount % (0 = no cap) */
   max_discount_percent: number;
   bulk_discount_tiers: DiscountTier[];
+  /** Applied automatically at billing; the best offer the bill qualifies for wins */
+  bill_offers: BillOffer[];
   enforce_moq: boolean;
   invoice_terms: string;
   /** This mode's GSTIN and drug licence number, printed on its invoices */

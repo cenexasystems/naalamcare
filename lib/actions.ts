@@ -4,9 +4,10 @@ import { db } from "./db/client";
 import * as schema from "./db/schema";
 import { and, asc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { formatBillId, formatCustomerId, formatPoNumber } from "./ids";
-import { calcBillTotals, round2 } from "./calc";
+import { calcBillOffer, calcBillTotals, round2 } from "./calc";
 import {
   AuthError,
+  builtInPasscodeStatus,
   clearSession,
   getSession,
   hashPasscode,
@@ -16,6 +17,7 @@ import {
   requireAdmin,
   requireMode,
   resolvePasscode,
+  setBuiltInPasscode,
   writeSession,
 } from "./auth";
 import { isMode, type Mode, type SessionInfo } from "./mode";
@@ -166,7 +168,7 @@ export async function saveUser(payload: {
     const passcode = normalisePasscode(payload.passcode ?? "");
     if (passcode) {
       if (passcode.length < 4) fail("Passcodes need at least 4 characters.");
-      if (isReservedPasscode(passcode)) fail("That passcode is already in use. Choose another.");
+      if (await isReservedPasscode(passcode)) fail("That passcode is already in use. Choose another.");
     }
     const editing = !isNewId(payload.id);
     if (!editing && !passcode) fail("Set a passcode for the new user.");
@@ -197,6 +199,46 @@ export async function saveUser(payload: {
       if (/unique|duplicate/i.test(String((err as { cause?: unknown })?.cause ?? err))) fail("That passcode is already in use. Choose another.");
       throw err;
     }
+  });
+}
+
+/* ==========================================================================
+   Built-in login passcodes (admin only) — Settings → Login passcodes
+   ========================================================================== */
+
+export async function getLoginPasscodeStatus(): Promise<ActionResult<{ admin: boolean; staff: boolean }>> {
+  return run(async () => {
+    await requireAdmin();
+    return builtInPasscodeStatus();
+  });
+}
+
+/** Reset the shared admin or staff passcode. `passcode: null` goes back to the server's (Vercel) value. */
+export async function resetLoginPasscode(payload: {
+  role: "admin" | "staff";
+  passcode: string | null;
+}): Promise<ActionResult<null>> {
+  return run(async () => {
+    await requireAdmin();
+    const role = payload.role === "admin" ? "admin" : "staff";
+    if (payload.passcode === null) {
+      await setBuiltInPasscode(role, null);
+      return null;
+    }
+    const passcode = normalisePasscode(payload.passcode);
+    if (passcode.length < 4) fail("Passcodes need at least 4 characters.");
+    // Each passcode must open exactly one login.
+    const current = await resolvePasscode(passcode);
+    const sameLogin = current && !current.userId && current.role === role;
+    if (current && !sameLogin) fail("That passcode is already used by another login. Choose another.");
+    const account = await db
+      .select({ id: schema.appUsers.id })
+      .from(schema.appUsers)
+      .where(eq(schema.appUsers.passcodeHash, hashPasscode(passcode)))
+      .limit(1);
+    if (account.length) fail("That passcode is already used by a user account. Choose another.");
+    await setBuiltInPasscode(role, passcode);
+    return null;
   });
 }
 
@@ -401,6 +443,7 @@ export async function saveBatch(mode: Mode, payload: any): Promise<ActionResult<
         box: str(payload.box).toUpperCase(),
         purchaseUnitType: str(payload.purchase_unit_type) || "Strip",
         packSize,
+        stripsPerBox: Math.max(0, int(payload.strips_per_box)),
         qtyPacks,
         stockAdded: packSize * qtyPacks,
         purchaseRate: String(rate),
@@ -612,6 +655,7 @@ export async function transferStock(
             box: str(payload.box).toUpperCase() || b.box,
             purchaseUnitType: b.purchaseUnitType,
             packSize: b.packSize,
+            stripsPerBox: b.stripsPerBox,
             qtyPacks: 0, // not a purchase: the supplier was already owed for these on the source side
             stockAdded: qty,
             stockQty: qty,
@@ -810,6 +854,16 @@ export async function saveModeSettings(mode: Mode, payload: any): Promise<Action
       .map((t: any) => ({ min_packs: int(t.min_packs), percent: round2(num(t.percent)) }))
       .filter((t: { min_packs: number; percent: number }) => t.min_packs > 0 && t.percent > 0 && t.percent < 100);
 
+    const offers = (Array.isArray(payload.bill_offers) ? payload.bill_offers : [])
+      .map((o: any) => ({ min_amount: round2(num(o.min_amount)), percent: round2(num(o.percent)) }))
+      .filter((o: { min_amount: number; percent: number }) => o.min_amount > 0 || o.percent > 0);
+    for (const o of offers as { min_amount: number; percent: number }[]) {
+      if (o.min_amount <= 0) fail("Each bill offer needs a minimum bill amount above ₹0.");
+      if (o.percent <= 0 || o.percent >= 100) fail("Each bill offer's discount must be between 0% and 100%.");
+    }
+    if (new Set(offers.map((o: { min_amount: number }) => o.min_amount)).size !== offers.length)
+      fail("Two bill offers have the same minimum amount — keep one.");
+
     const values = {
       invoicePrefix: prefix,
       paymentMethods: finalMethods.join(","),
@@ -817,6 +871,7 @@ export async function saveModeSettings(mode: Mode, payload: any): Promise<Action
       defaultCreditDays: Math.max(0, int(payload.default_credit_days)),
       maxDiscountPercent: String(Math.min(100, Math.max(0, round2(num(payload.max_discount_percent))))),
       bulkDiscountTiers: JSON.stringify(tiers),
+      billOffers: JSON.stringify(offers),
       enforceMoq: Boolean(payload.enforce_moq),
       invoiceTerms: String(payload.invoice_terms ?? "").slice(0, 1000),
     };
@@ -1022,10 +1077,13 @@ export async function submitBill(
       const totals = calcBillTotals(
         priced.map((p) => ({ qty: p.qty, mrp_per_unit: p.mrpPerUnit, per_unit_price: p.perUnit, gst_percent: num(p.batch.gstPercent) })),
       );
-      const extraDiscount = Math.min(Math.max(0, round2(num(payload.extra_discount))), totals.grandTotal);
+      // Bill offers are applied here from the saved settings, never trusted from the counter.
+      const offerDiscount = calcBillOffer(settings.bill_offers, totals.grandTotal).discount;
+      const afterOffer = round2(totals.grandTotal - offerDiscount);
+      const extraDiscount = Math.min(Math.max(0, round2(num(payload.extra_discount))), afterOffer);
       if (settings.max_discount_percent > 0 && extraDiscount > round2((totals.grandTotal * settings.max_discount_percent) / 100) + 0.01)
         fail(`The extra discount can't be more than ${settings.max_discount_percent}% of the bill.`);
-      const grandTotal = round2(totals.grandTotal - extraDiscount);
+      const grandTotal = round2(afterOffer - extraDiscount);
       const received = Math.max(0, round2(num(payload.received_amount)));
 
       let paid = grandTotal;
@@ -1077,7 +1135,7 @@ export async function submitBill(
         txnRef: str(payload.txn_ref),
         billDate,
         subTotal: totals.subTotal.toString(),
-        discount: round2(totals.discount + extraDiscount).toString(),
+        discount: round2(totals.discount + offerDiscount + extraDiscount).toString(),
         taxableAmount: totals.taxableAmount.toString(),
         gstAmount: totals.gstAmount.toString(),
         gstPercent: totals.gstPercent.toString(),

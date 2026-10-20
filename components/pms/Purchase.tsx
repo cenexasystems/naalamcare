@@ -10,7 +10,7 @@ import {
   calcStockAdded,
   calcTotal,
 } from "@/lib/calc";
-import { amount, monthShort, todayIso, unitNoun } from "@/lib/format";
+import { amount, monthShort, packNoun, todayIso, unitNoun } from "@/lib/format";
 import { useSettings } from "./data";
 import { saveBatch, saveMedicine, saveSupplier } from "@/lib/actions";
 import { Button, Card, Field, ScreenHeading, Select, TextInput } from "./ui";
@@ -42,6 +42,7 @@ const blankForm = (defaultGst = 12) => ({
   expDate: "",
   box: "",
   packSize: "",
+  stripsPerBox: "",
   quantity: "",
   purchaseRate: "",
   mrp: "",
@@ -126,13 +127,18 @@ export const Purchase = ({
       gst: String(medicine.gst_percent),
       box: last?.box || prev.box,
       packSize: last ? String(last.pack_size) : prev.packSize,
+      stripsPerBox: last?.strips_per_box ? String(last.strips_per_box) : prev.stripsPerBox,
     }));
     setShowResults(false);
   };
 
   /* --------------------------- auto calculations ------------------------- */
   const packSize = Number(form.packSize) || 0;
+  const stripsPerBox = Math.max(0, Math.floor(Number(form.stripsPerBox) || 0));
   const quantity = Number(form.quantity) || 0;
+  const packWord = packNoun(form.purchaseUnitType);
+  /** Whole boxes in the quantity entered (blank when it isn't a whole number of boxes) */
+  const boxesInQuantity = stripsPerBox > 0 && quantity > 0 && quantity % stripsPerBox === 0 ? quantity / stripsPerBox : 0;
   const mrp = Number(form.mrp) || 0;
   const sellingPrice = Number(form.sellingPrice) || 0;
   const purchaseRate = Number(form.purchaseRate) || 0;
@@ -227,6 +233,7 @@ export const Purchase = ({
       box: form.box.trim().toUpperCase(),
       purchase_unit_type: form.purchaseUnitType,
       pack_size: packSize,
+      strips_per_box: stripsPerBox,
       qty_packs: quantity,
       stock_added: stockAdded,
       stock_qty: stockAdded,
@@ -503,7 +510,28 @@ export const Purchase = ({
                 placeholder="10"
               />
             </Field>
-            <Field label="Quantity">
+            <Field label={`${packWord} per box`}>
+              <TextInput
+                type="number"
+                value={form.stripsPerBox}
+                onChange={(e) => set("stripsPerBox", e.target.value)}
+                placeholder="e.g. 10"
+              />
+            </Field>
+            {stripsPerBox > 0 && (
+              <Field label="Boxes">
+                <TextInput
+                  type="number"
+                  value={boxesInQuantity ? String(boxesInQuantity) : ""}
+                  onChange={(e) => {
+                    const boxes = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                    set("quantity", boxes ? String(boxes * stripsPerBox) : "");
+                  }}
+                  placeholder="2"
+                />
+              </Field>
+            )}
+            <Field label={`Quantity (${packWord})`}>
               <TextInput
                 type="number"
                 value={form.quantity}
@@ -606,6 +634,7 @@ export const Purchase = ({
                 Stock will be added as <b>{stockAdded} {unitWord}</b> in inventory ({quantity}{" "}
                 {form.purchaseUnitType}
                 {quantity === 1 ? "" : "s"} × {packSize} = {stockAdded} {unitWord})
+                {boxesInQuantity ? ` · ${boxesInQuantity} box${boxesInQuantity === 1 ? "" : "es"} of ${stripsPerBox} ${packWord}` : ""}
                 {form.expDate ? ` · Expires ${monthShort(form.expDate)}` : ""}
                 {form.box ? ` · Box ${form.box}` : ""}
               </>

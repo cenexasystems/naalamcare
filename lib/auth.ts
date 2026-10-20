@@ -12,12 +12,12 @@ import { MODES, isMode, type Mode, type Role, type SessionInfo } from "./mode";
 
    Everyone signs in on the same login page with a passcode. A passcode
    belongs to one of:
-     • the built-in admin passcode (ADMIN_PASSCODE) — always works, so the
-       owner can never be locked out;
+     • the built-in admin passcode (ADMIN_PASSCODE, or the one set in
+       Settings → Login passcodes, which then replaces it);
      • a user account created by the admin in Settings → Users (role admin
        or staff, with Retail / Wholesale / both dashboard access);
-     • the optional shared staff passcode (STAFF_PASSCODE), kept for
-       existing installs; its dashboards come from STAFF_MODES.
+     • the optional shared staff passcode (STAFF_PASSCODE, or its Settings
+       replacement); its dashboards come from STAFF_MODES.
    Retail and wholesale are dashboards a user may open — never roles.
 
    The result is kept in a signed, httpOnly cookie. For user accounts the
@@ -61,11 +61,51 @@ export const normalisePasscode = (passcode: string) => String(passcode ?? "").re
 export const hashPasscode = (passcode: string) =>
   scryptSync(normalisePasscode(passcode), "nalam-care-medicals/app-users", 32).toString("hex");
 
-/** Passcodes reserved by the environment; user accounts can't reuse them. */
-export const isReservedPasscode = (passcode: string) => {
+/** Hashes of built-in passcodes reset from Settings; a set one replaces the environment value. */
+const savedPasscodeHashes = async (): Promise<{ admin: string; staff: string }> => {
+  try {
+    const rows = await db.select().from(schema.loginPasscodes);
+    const of = (role: Role) => rows.find((r) => r.role === role)?.passcodeHash || "";
+    return { admin: of("admin"), staff: of("staff") };
+  } catch (err) {
+    // Before database.sql has created login_passcodes, the environment passcodes apply.
+    if (!/login_passcodes/.test(String((err as { cause?: unknown })?.cause ?? err))) throw err;
+    return { admin: "", staff: "" };
+  }
+};
+
+/** Does `passcode` open the built-in admin / staff login (saved reset first, else the environment)? */
+const matchesBuiltIn = async (passcode: string): Promise<Role | null> => {
   const p = normalisePasscode(passcode);
+  if (!p) return null;
+  const saved = await savedPasscodeHashes();
   const codes = passcodes();
-  return p === codes.admin || p === codes.staff;
+  const hash = hashPasscode(p);
+  if (saved.admin ? hash === saved.admin : p === codes.admin) return "admin";
+  if (saved.staff ? hash === saved.staff : p === codes.staff) return "staff";
+  return null;
+};
+
+/** Passcodes of the built-in logins; user accounts can't reuse them. */
+export const isReservedPasscode = async (passcode: string) => (await matchesBuiltIn(passcode)) !== null;
+
+/** Settings → Login passcodes: set a new built-in admin / staff passcode, or null to go back to the server value. */
+export const setBuiltInPasscode = async (role: Role, passcode: string | null) => {
+  if (passcode === null) {
+    await db.delete(schema.loginPasscodes).where(eq(schema.loginPasscodes.role, role));
+    return;
+  }
+  const passcodeHash = hashPasscode(passcode);
+  await db
+    .insert(schema.loginPasscodes)
+    .values({ role, passcodeHash })
+    .onConflictDoUpdate({ target: schema.loginPasscodes.role, set: { passcodeHash, updatedAt: new Date() } });
+};
+
+/** Which built-in passcodes have been reset from Settings (never the passcodes themselves). */
+export const builtInPasscodeStatus = async () => {
+  const saved = await savedPasscodeHashes();
+  return { admin: Boolean(saved.admin), staff: Boolean(saved.staff) };
 };
 
 export const parseModes = (raw: string): Mode[] => {
@@ -74,6 +114,16 @@ export const parseModes = (raw: string): Mode[] => {
 };
 
 const sign = (payload: string) => createHmac("sha256", secret()).update(payload).digest("base64url");
+
+/** Token for a customer-facing invoice link (e.g. sent on WhatsApp): opens that one bill, read-only, without a login. */
+export const billShareToken = (billId: string): string => sign(`bill-share|${billId}`).slice(0, 24);
+
+export const isValidBillShareToken = (billId: string, token: unknown): boolean => {
+  if (typeof token !== "string" || !token) return false;
+  const expected = Buffer.from(billShareToken(billId));
+  const given = Buffer.from(token);
+  return given.length === expected.length && timingSafeEqual(given, expected);
+};
 
 const encode = (session: SessionInfo): string => {
   const payload = Buffer.from(
@@ -118,8 +168,8 @@ const accountSession = (user: typeof schema.appUsers.$inferSelect): SessionInfo 
 export const resolvePasscode = async (passcode: string): Promise<SessionInfo | null> => {
   const entered = normalisePasscode(passcode);
   if (!entered) return null;
-  const codes = passcodes();
-  if (entered === codes.admin) return { role: "admin", modes: [...MODES], name: "" };
+  const builtIn = await matchesBuiltIn(entered);
+  if (builtIn === "admin") return { role: "admin", modes: [...MODES], name: "" };
 
   try {
     const rows = await db.select().from(schema.appUsers).where(eq(schema.appUsers.passcodeHash, hashPasscode(entered))).limit(1);
@@ -130,7 +180,7 @@ export const resolvePasscode = async (passcode: string): Promise<SessionInfo | n
     if (!/app_users/.test(String((err as { cause?: unknown })?.cause ?? err))) throw err;
   }
 
-  if (entered === codes.staff) return { role: "staff", modes: staffModes(), name: "" };
+  if (builtIn === "staff") return { role: "staff", modes: staffModes(), name: "" };
   return null;
 };
 
