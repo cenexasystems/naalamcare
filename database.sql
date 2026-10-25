@@ -468,3 +468,17 @@ CREATE TABLE IF NOT EXISTS "login_passcodes" (
 -- ---------------------------------------------------------------------------
 
 ALTER TABLE "batches" ADD COLUMN IF NOT EXISTS "strips_per_box" integer DEFAULT 0 NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 12. Offer pop-up on customer invoice links (JSON, edited in Settings)
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "invoice_promo" text DEFAULT '' NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 13. Product types (Tablet, Injection, Cartridge…) on medicines and bill lines
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "medicines" ADD COLUMN IF NOT EXISTS "product_type" text DEFAULT '' NOT NULL;
+ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "product_type" text DEFAULT '' NOT NULL;
+ALTER TABLE "settings" ADD COLUMN IF NOT EXISTS "product_types" text DEFAULT '' NOT NULL;

@@ -22,6 +22,7 @@ import {
   Supplier,
 } from "./types";
 import { calcBillTotals, calcIncludedGst, round2 } from "./calc";
+import { DEFAULT_PRODUCT_TYPES } from "./product-types";
 
 const STORAGE_KEY = "nalam_care_medicals_pms_v2";
 /** Browser keys left by the previous app on this device — removed on first load. */
@@ -78,6 +79,7 @@ export const DEFAULT_SETTINGS: ShopSettings = {
   default_gst: 12,
   low_stock_threshold: 20,
   expiry_alert_months: 6,
+  product_types: DEFAULT_PRODUCT_TYPES,
 };
 
 type SeedRow = {
@@ -146,6 +148,7 @@ const buildSeed = (): Store => {
       manufacturer: row.maker,
       salt: row.salt,
       schedule: row.schedule,
+      product_type: "Tablet",
       hsn_code: row.hsn,
       gst_percent: row.gst,
       purchase_unit_type: row.unitType,
@@ -628,6 +631,7 @@ export const submitBill = (payload: {
       brand_name: line.brand_name,
       manufacturer: line.manufacturer,
       schedule: line.schedule,
+      product_type: line.product_type ?? "",
       hsn_code: line.hsn_code,
       batch_no: line.batch_no,
       mfg_date: line.mfg_date,

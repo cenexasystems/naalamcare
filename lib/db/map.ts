@@ -17,6 +17,8 @@ import type {
   Supplier,
 } from "../types";
 import { isMode, type Mode } from "../mode";
+import { normalisePromo } from "../promo";
+import { parseProductTypes } from "../product-types";
 
 const modeOrNull = (value: unknown): Mode | null => (isMode(value) ? value : null);
 
@@ -45,6 +47,7 @@ export const mapMedicine = (row: any): Medicine => ({
   manufacturer: row.manufacturer,
   salt: row.salt,
   schedule: row.schedule as any,
+  product_type: row.productType || "",
   hsn_code: row.hsnCode,
   gst_percent: toNum(row.gstPercent),
   purchase_unit_type: row.purchaseUnitType as any,
@@ -121,6 +124,7 @@ export const mapBillItem = (row: any): BillItem => ({
   brand_name: row.brandName,
   manufacturer: row.manufacturer,
   schedule: row.schedule as any,
+  product_type: row.productType || "",
   hsn_code: row.hsnCode,
   batch_no: row.batchNo,
   mfg_date: row.mfgDate,
@@ -190,6 +194,7 @@ export const mapSettings = (row: any): ShopSettings => ({
   default_gst: toNum(row.defaultGst),
   low_stock_threshold: row.lowStockThreshold,
   expiry_alert_months: row.expiryAlertMonths,
+  product_types: parseProductTypes(row.productTypes),
 });
 
 export const mapModeSettings = (row: any, mode: Mode): ModeSettings => ({
@@ -214,6 +219,7 @@ export const mapModeSettings = (row: any, mode: Mode): ModeSettings => ({
     .sort((a, b) => a.min_amount - b.min_amount),
   enforce_moq: Boolean(row?.enforceMoq ?? mode === "wholesale"),
   invoice_terms: row?.invoiceTerms ?? "",
+  invoice_promo: normalisePromo(row?.invoicePromo),
   gstin: row?.gstin ?? "",
   dl_no: row?.dlNo ?? "",
   shop_name: row?.shopName ?? "",

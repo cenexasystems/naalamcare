@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { applyModeShopDetails, getBill, getModeSettings, getSettings } from "@/lib/db/queries";
+import { applyModeShopDetails, getBill, getBillReturns, getModeSettings, getSettings } from "@/lib/db/queries";
 import { billShareToken, getSession, isValidBillShareToken } from "@/lib/auth";
 import { APP_NAME } from "@/lib/mode";
 import { amount, amountInWords, dateSlash, monthShort, money } from "@/lib/format";
 import type { Bill, BillItem } from "@/lib/types";
 import { InvoiceActions } from "./InvoiceActions";
+import { InvoiceFit } from "./InvoiceFit";
+import { InvoicePromoPopup } from "@/components/pms/InvoicePromoPopup";
 
 /* ==========================================================================
    A4 GST Tax Invoice
@@ -59,7 +61,10 @@ const gstOf = (item: BillItem): number => {
   return amount - amount / (1 + pct / 100);
 };
 
-const DEFAULT_TERMS = ["Goods once sold will not be taken back.", "Please check Batch No, Qty, Exp before taking delivery."];
+const DEFAULT_TERMS = [
+  "Please check your bill, product expiry, quantity and batch before leaving.",
+  "Product replacement within 7 days.",
+];
 
 export default async function InvoicePage({
   params,
@@ -84,6 +89,9 @@ export default async function InvoicePage({
   const shopWide = await getSettings();
   const shop = shopWide && modeSettings ? applyModeShopDetails(shopWide, modeSettings) : shopWide;
   const wholesale = bill?.mode === "wholesale";
+  // Returns change what the customer finally paid: the invoice lists them and shows the revised total.
+  const returns = bill && bill.returned_amount > 0 ? await getBillReturns(bill.id) : [];
+  const revisedTotal = bill ? Math.max(0, bill.grand_total - bill.returned_amount) : 0;
   const terms = (modeSettings?.invoice_terms || "")
     .split("\n")
     .map((t) => t.trim())
@@ -145,11 +153,16 @@ export default async function InvoicePage({
           sharePath={sharePath}
           canShare={!sharedView}
           phone={bill.customer_phone}
-          message={`${shop?.shop_name || APP_NAME} — Invoice ${bill.id} dated ${dateSlash(bill.bill_date)}, amount ${money(bill.grand_total)}.`}
+          message={`${shop?.shop_name || APP_NAME} — Invoice ${bill.id} dated ${dateSlash(bill.bill_date)}, amount ${money(revisedTotal)}.`}
         />
       </div>
 
-      <div className="invoice-sheet w-full max-w-[210mm] bg-white p-4 text-black shadow-sm print:p-0">
+      {/* Offer pop-up for customers opening the link we sent them — not for staff, never printed. */}
+      {sharedView && modeSettings?.invoice_promo.enabled && (
+        <InvoicePromoPopup promo={modeSettings.invoice_promo} shopName={shop?.shop_name || APP_NAME} />
+      )}
+      <InvoiceFit>
+      <div className="invoice-sheet w-full bg-white p-4 text-black shadow-sm print:p-0">
         {/* ---------- Header: shop identity left, GST / DL numbers right ---------- */}
         <div className="flex items-start justify-between gap-6 border-b-2 border-black pb-2">
           <div className="text-[10.5px] leading-[1.35]">
@@ -212,7 +225,7 @@ export default async function InvoicePage({
         <table className="w-full border-collapse text-[9.5px] leading-[1.3]">
           <thead>
             <tr className="bg-[#d9d9d9]">
-              {["No", "Product Name", "Pack", "Mfr", "Batch", "Exp", "MRP", "Qty", "Free", "Rate", "Disc", "GST%", "Amount", "HSN"].map((h) => (
+              {["No", "Type", "Product Name", "Pack", "Mfr", "Batch", "Exp", "MRP", "Qty", "Free", "Rate", "Disc", "GST%", "Amount", "HSN"].map((h) => (
                 <th key={h} className="border border-black px-1 py-1 text-center font-bold">{h}</th>
               ))}
             </tr>
@@ -221,6 +234,7 @@ export default async function InvoicePage({
             {bill.items.map((item, index) => (
               <tr key={item.id} className="align-top">
                 <td className="border border-black px-1 py-0.5 text-center">{index + 1}</td>
+                <td className="border border-black px-1 py-0.5 text-center">{item.product_type}</td>
                 <td className="border border-black px-1 py-0.5">
                   <p className="font-bold uppercase">{item.generic_name}</p>
                   {item.brand_name && <p>{item.brand_name}</p>}
@@ -241,11 +255,43 @@ export default async function InvoicePage({
               </tr>
             ))}
             <tr>
-              <td colSpan={13} className="border border-black px-1 py-1" />
+              <td colSpan={14} className="border border-black px-1 py-1" />
               <td className="border border-black" />
             </tr>
           </tbody>
         </table>
+
+        {/* ---------- Returns against this bill ---------- */}
+        {returns.length > 0 && (
+          <div className="inv-break mt-1 border border-black text-[9.5px]">
+            <p className="bg-[#d9d9d9] px-1 py-0.5 font-bold">Returns</p>
+            <table className="w-full border-collapse">
+              <thead>
+                <tr>
+                  {["Date", "Product Name", "Batch", "Qty Returned", "Amount", "Refund"].map((h) => (
+                    <th key={h} className="border border-black px-1 py-0.5 text-center font-bold">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {returns.flatMap((r) =>
+                  r.items.map((it, n) => (
+                    <tr key={`${r.id}-${n}`}>
+                      <td className="border border-black px-1 py-0.5 text-center">{dateSlash(r.created_at.slice(0, 10))}</td>
+                      <td className="border border-black px-1 py-0.5 font-bold uppercase">{it.generic_name}</td>
+                      <td className="border border-black px-1 py-0.5 text-center">{it.batch_no}</td>
+                      <td className="border border-black px-1 py-0.5 text-right">{it.qty}</td>
+                      <td className="border border-black px-1 py-0.5 text-right">{amount(it.amount)}</td>
+                      <td className="border border-black px-1 py-0.5 text-center">
+                        {n === 0 ? (r.refund_amount > 0 ? `${amount(r.refund_amount)} ${r.refund_method}` : "Adjusted in due") : ""}
+                      </td>
+                    </tr>
+                  )),
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* ---------- Totals + GST breakup ---------- */}
         <div className="inv-break mt-1 flex items-stretch text-[9.5px]">
@@ -285,6 +331,18 @@ export default async function InvoicePage({
                   <td className="border border-black px-1 py-0.5">Txn Ref No.</td>
                   <td className="border border-black px-1 py-0.5 text-right">{bill.txn_ref}</td>
                 </tr>
+                {bill.returned_amount > 0 && (
+                  <>
+                    <tr>
+                      <td className="border border-black px-1 py-0.5">Less: Returns</td>
+                      <td className="border border-black px-1 py-0.5 text-right">−{amount(bill.returned_amount)}</td>
+                    </tr>
+                    <tr>
+                      <td className="border border-black px-1 py-0.5 font-bold">Revised Net Amount</td>
+                      <td className="border border-black px-1 py-0.5 text-right font-bold">{amount(revisedTotal)}</td>
+                    </tr>
+                  </>
+                )}
                 {bill.due_amount > 0 && (
                   <tr>
                     <td className="border border-black px-1 py-0.5 font-bold">Balance Due</td>
@@ -334,15 +392,20 @@ export default async function InvoicePage({
           </table>
           <div className="flex items-center justify-between border-t border-black px-1 py-0.5">
             <span>Due bills :</span>
-            <span className="font-bold">Net Amount</span>
+            <span className="font-bold">{bill.returned_amount > 0 ? "Revised Net Amount" : "Net Amount"}</span>
           </div>
-          <div className="flex items-center justify-end px-1 py-1">
-            <span className="text-[17px] font-bold">{money(bill.grand_total)}</span>
+          <div className="flex items-center justify-end gap-3 px-1 py-1">
+            {bill.returned_amount > 0 && (
+              <span className="text-[10px] text-gray-700">
+                {money(bill.grand_total)} − returns {money(bill.returned_amount)} =
+              </span>
+            )}
+            <span className="text-[17px] font-bold">{money(revisedTotal)}</span>
           </div>
         </div>
 
         {/* ---------- Amount in words ---------- */}
-        <p className="mt-1 text-[9.5px] uppercase">{amountInWords(bill.grand_total)}</p>
+        <p className="mt-1 text-[9.5px] uppercase">{amountInWords(revisedTotal)}</p>
 
         {/* ---------- Terms + signature ---------- */}
         <div className="inv-break mt-2 flex items-end justify-between gap-6 text-[9px] leading-[1.4]">
@@ -353,7 +416,6 @@ export default async function InvoicePage({
                 {i + 1}. {t}
               </p>
             ))}
-            <p>{(terms.length ? terms : DEFAULT_TERMS).length + 1}. E&amp;O.E</p>
           </div>
           <div className="w-[46%] text-center">
             <p className="font-bold">For {shop?.shop_name || APP_NAME}</p>
@@ -362,6 +424,7 @@ export default async function InvoicePage({
           </div>
         </div>
       </div>
+      </InvoiceFit>
     </div>
   );
 }

@@ -29,6 +29,7 @@ import { useReconciliation } from "./data";
 import { INVENTORY_SHEET } from "./exports";
 import { downloadCsv, downloadExcel } from "@/lib/xlsx";
 import { useSettings } from "./data";
+import { DEFAULT_PRODUCT_TYPES, productTypeOptions } from "@/lib/product-types";
 import { playAlarmBeep } from "@/lib/alarm";
 import { Button, Card, Field, Modal, PageTitle, Pill, Select, StatTile, TextInput } from "./ui";
 
@@ -851,6 +852,7 @@ const EditMedicineModal = ({
   // Keyed by medicine id at the call site, so a fresh draft comes from mounting.
   const [draft, setDraft] = useState<Medicine | null>(medicine);
   const mode = useMode();
+  const { data: settings } = useSettings();
   const isNew = medicine?.id === NEW_MEDICINE.id;
   if (!draft) return null;
 
@@ -890,6 +892,16 @@ const EditMedicineModal = ({
             {SCHEDULES.map((s) => (
               <option key={s} value={s}>
                 {s}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Product Type">
+          <Select value={draft.product_type} onChange={(e) => set({ product_type: e.target.value })}>
+            <option value="">— Select —</option>
+            {productTypeOptions(settings?.product_types ?? DEFAULT_PRODUCT_TYPES, draft.product_type).map((t) => (
+              <option key={t} value={t}>
+                {t}
               </option>
             ))}
           </Select>
@@ -1059,6 +1071,7 @@ const pageNumbers = (current: number, total: number): (number | string)[] => {
 
 const NEW_MEDICINE: Medicine = {
   id: "new-medicine",
+  product_type: "",
   generic_name: "",
   brand_name: "",
   manufacturer: "",

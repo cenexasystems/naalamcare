@@ -196,6 +196,7 @@ export const Billing = ({
           manufacturer: batch.manufacturer || selected.manufacturer,
           salt: selected.salt,
           schedule: selected.schedule,
+          product_type: selected.product_type,
           hsn_code: selected.hsn_code,
           batch_no: batch.batch_no,
           mfg_date: batch.mfg_date,
@@ -684,6 +685,7 @@ export const Billing = ({
               <thead>
                 <tr className="bg-[#fafbfc] text-gray-600">
                   <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold">#</th>
+                  <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold">Type</th>
                   <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold">Product</th>
                   <th className="px-1.5 py-2.5 text-center text-[11px] font-semibold">Box</th>
                   <th className="px-1.5 py-2.5 text-center text-[11px] font-semibold">Quantity</th>
@@ -704,6 +706,7 @@ export const Billing = ({
                 {lines.map((line, index) => (
                   <tr key={line.key} className="align-middle">
                     <td className="px-1.5 py-3 text-[12px] text-gray-500">{index + 1}</td>
+                    <td className="px-1.5 py-3 text-[11.5px] font-medium text-gray-700">{line.product_type || "—"}</td>
                     <td className="px-1.5 py-3">
                       <p className="text-[12.5px] font-semibold leading-tight text-gray-900">
                         {line.generic_name}
@@ -744,7 +747,7 @@ export const Billing = ({
                 ))}
                 {!lines.length && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-14 text-center text-[13px] text-gray-400">
+                    <td colSpan={8} className="px-4 py-14 text-center text-[13px] text-gray-400">
                       No items yet — search a medicine and press ADD TO BILL (F5)
                     </td>
                   </tr>

@@ -50,6 +50,8 @@ export const medicines = pgTable(
     manufacturer: text("manufacturer").notNull().default(""),
     salt: text("salt").notNull().default(""),
     schedule: text("schedule").notNull(),
+    /** Product type from Settings → Product Types, e.g. "Tablet", "Injection" */
+    productType: text("product_type").notNull().default(""),
     hsnCode: text("hsn_code").notNull().default(""),
     gstPercent: numeric("gst_percent", { precision: 5, scale: 2 }).notNull().default("0"),
     purchaseUnitType: text("purchase_unit_type").notNull(),
@@ -196,6 +198,8 @@ export const billItems = pgTable(
     brandName: text("brand_name").notNull().default(""),
     manufacturer: text("manufacturer").notNull().default(""),
     schedule: text("schedule").notNull(),
+    /** Product type from Settings → Product Types, e.g. "Tablet", "Injection" */
+    productType: text("product_type").notNull().default(""),
     hsnCode: text("hsn_code").notNull().default(""),
     batchNo: text("batch_no").notNull().default(""),
     mfgDate: text("mfg_date").notNull().default(""),
@@ -237,6 +241,8 @@ export const settings = pgTable("settings", {
   defaultGst: numeric("default_gst", { precision: 5, scale: 2 }).notNull().default("12"),
   lowStockThreshold: integer("low_stock_threshold").notNull().default(20),
   expiryAlertMonths: integer("expiry_alert_months").notNull().default(6),
+  /** JSON list of product types offered when adding medicines ("" = the defaults) */
+  productTypes: text("product_types").notNull().default(""),
 });
 
 /* --------------------------------------------------------------------------
@@ -262,6 +268,8 @@ export const modeSettings = pgTable("mode_settings", {
   enforceMoq: boolean("enforce_moq").notNull().default(false),
   /** Printed under "Terms & Conditions" on this mode's invoices; one per line. */
   invoiceTerms: text("invoice_terms").notNull().default(""),
+  /** JSON: offer pop-up on customer invoice links (see lib/promo.ts); "" = default, switched off */
+  invoicePromo: text("invoice_promo").notNull().default(""),
   /** GSTIN and drug licence number printed on this mode's invoices. */
   gstin: text("gstin").notNull().default(""),
   dlNo: text("dl_no").notNull().default(""),

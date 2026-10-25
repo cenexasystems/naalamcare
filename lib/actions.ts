@@ -5,6 +5,8 @@ import * as schema from "./db/schema";
 import { and, asc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { formatBillId, formatCustomerId, formatPoNumber } from "./ids";
 import { calcBillOffer, calcBillTotals, round2 } from "./calc";
+import { normalisePromo } from "./promo";
+import { parseProductTypes } from "./product-types";
 import {
   AuthError,
   builtInPasscodeStatus,
@@ -278,6 +280,7 @@ export async function saveMedicine(mode: Mode, payload: any): Promise<ActionResu
       genericName,
       salt: str(payload.salt) || genericName,
       schedule: str(payload.schedule) || "OTC",
+      productType: str(payload.product_type).slice(0, 40),
       hsnCode: str(payload.hsn_code),
       gstPercent: String(gst),
       purchaseUnitType: str(payload.purchase_unit_type) || "Strip",
@@ -921,6 +924,33 @@ export async function saveModeSettings(mode: Mode, payload: any): Promise<Action
   });
 }
 
+/** Settings → Product Types: the list offered when adding / editing medicines (shared by both dashboards). */
+export async function saveProductTypes(types: string[]): Promise<ActionResult<string[]>> {
+  return run(async () => {
+    await requireAdmin();
+    const list = parseProductTypes(Array.isArray(types) ? types : []);
+    if (!list.length) fail("Keep at least one product type.");
+    if (list.length > 40) fail("Keep the list to 40 product types or fewer.");
+    await db.update(schema.settings).set({ productTypes: JSON.stringify(list) }).where(eq(schema.settings.id, 1));
+    return list;
+  });
+}
+
+/** Settings → Invoice Offer Pop-up: what customers see when they open their invoice link. */
+export async function saveInvoicePromo(mode: Mode, payload: unknown): Promise<ActionResult<null>> {
+  return run(async () => {
+    await requireMode(mode, { admin: true });
+    const promo = normalisePromo(payload);
+    if (promo.enabled && !promo.title && !promo.groups.length) fail("Add a title or at least one offer before switching the pop-up on.");
+    const values = { invoicePromo: JSON.stringify(promo) };
+    await db
+      .insert(schema.modeSettings)
+      .values({ mode, ...values })
+      .onConflictDoUpdate({ target: schema.modeSettings.mode, set: values });
+    return null;
+  });
+}
+
 /* ==========================================================================
    Billing
    ========================================================================== */
@@ -1198,6 +1228,7 @@ export async function submitBill(
           brandName: p.batch.brandName || p.med.brandName,
           manufacturer: p.batch.manufacturer || p.med.manufacturer,
           schedule: p.med.schedule,
+          productType: p.med.productType,
           hsnCode: p.med.hsnCode,
           batchNo: p.batch.batchNo,
           mfgDate: p.batch.mfgDate,

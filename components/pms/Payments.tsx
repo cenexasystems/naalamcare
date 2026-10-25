@@ -453,10 +453,15 @@ const ReturnModal = ({
                 }),
               );
               setSaving(false);
-              if (res.ok)
+              if (res.ok) {
                 onDone(
-                  `Return saved — ${money(res.data.amount)}${res.data.refund > 0 ? `, refund ${money(res.data.refund)}` : ""}.`,
+                  `Return saved — ${money(res.data.amount)}${res.data.refund > 0 ? `, refund ${money(res.data.refund)}` : ""}. Revised bill opened.`,
                 );
+                // The invoice now lists the return and the revised net amount — open it to print / send.
+                const url = `/invoice/${encodeURIComponent(bill.id)}`;
+                // iPhone blocks new tabs opened after an await — fall back to this tab.
+                if (!window.open(url, "_blank")) window.location.href = url;
+              }
             }}
           >
             {saving ? "Saving…" : "Save return"}
@@ -465,25 +470,34 @@ const ReturnModal = ({
       }
     >
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px]">
+        <table className="w-full min-w-[720px]">
           <thead>
             <tr className="bg-[#f4f6f8] text-gray-700">
               <th className="th">Product</th>
               <th className="th">Batch</th>
-              <th className="th text-right">Sold</th>
-              <th className="th text-right">Returned</th>
+              <th className="th text-right">Rate (₹)</th>
+              <th className="th text-right">Qty bought</th>
+              <th className="th text-right">Amount paid (₹)</th>
+              <th className="th text-right">Already returned</th>
               <th className="th text-right">Return now</th>
+              <th className="th text-right">Return value (₹)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#f1f3f5]">
             {bill.items.map((i) => {
               const left = i.qty - i.returned_qty;
+              const now = Math.floor(Number(qty[i.id]) || 0);
               return (
                 <tr key={i.id}>
-                  <td className="td">{i.generic_name}</td>
+                  <td className="td">
+                    <p className="font-semibold text-gray-900">{i.generic_name}</p>
+                    {i.product_type && <p className="text-[11px] text-gray-500">{i.product_type}</p>}
+                  </td>
                   <td className="td">{i.batch_no}</td>
+                  <td className="td text-right">{amount(round2(i.per_unit_price * factor))}</td>
                   <td className="td text-right">{i.qty}</td>
-                  <td className="td text-right">{i.returned_qty}</td>
+                  <td className="td text-right font-semibold">{amount(round2(i.line_amount * factor))}</td>
+                  <td className="td text-right">{i.returned_qty || "—"}</td>
                   <td className="td text-right">
                     <input
                       type="number"
@@ -496,6 +510,9 @@ const ReturnModal = ({
                       }
                       className="h-8 w-[70px] rounded-md border border-[#e3e7ea] text-center text-[12.5px] font-bold outline-none focus:border-[var(--c-primary)] disabled:bg-gray-50"
                     />
+                  </td>
+                  <td className="td text-right font-semibold text-[var(--c-deep)]">
+                    {now > 0 ? amount(round2(i.per_unit_price * now * factor)) : "—"}
                   </td>
                 </tr>
               );
@@ -518,6 +535,12 @@ const ReturnModal = ({
         </Field>
       </div>
       <p className="mt-3 text-[13px] text-gray-700">
+        Bill total <b>{money(bill.grand_total)}</b>
+        {bill.returned_amount > 0 && <> · returned earlier {money(bill.returned_amount)}</>} · this return{" "}
+        <b>{money(value)}</b> · revised bill{" "}
+        <b>{money(round2(Math.max(0, bill.grand_total - bill.returned_amount - value)))}</b>
+      </p>
+      <p className="mt-1 text-[13px] text-gray-700">
         Return value <b>{money(value)}</b>
         {setOff > 0 && (
           <>

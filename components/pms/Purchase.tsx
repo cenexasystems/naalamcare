@@ -12,6 +12,7 @@ import {
 } from "@/lib/calc";
 import { amount, monthShort, packNoun, todayIso, unitNoun } from "@/lib/format";
 import { useSettings } from "./data";
+import { DEFAULT_PRODUCT_TYPES, productTypeOptions } from "@/lib/product-types";
 import { saveBatch, saveMedicine, saveSupplier } from "@/lib/actions";
 import { Button, Card, Field, ScreenHeading, Select, TextInput } from "./ui";
 import { act, useMode } from "./mode-context";
@@ -32,6 +33,7 @@ const blankForm = (defaultGst = 12) => ({
   medicineName: "",
   purchaseUnitType: "Strip" as PurchaseUnitType,
   schedule: "OTC" as DrugSchedule,
+  productType: "",
   genericName: "",
   brandName: "",
   manufacturer: "",
@@ -67,6 +69,7 @@ export const Purchase = ({
   const [tab, setTab] = useState<"receipt" | "orders" | "returns">("receipt");
   const [saving, setSaving] = useState(false);
   const { data: settings } = useSettings();
+  const productTypes = settings?.product_types ?? DEFAULT_PRODUCT_TYPES;
   const defaultGst = settings?.default_gst ?? 12;
   const [form, setForm] = useState(() => blankForm(defaultGst));
 
@@ -123,6 +126,7 @@ export const Purchase = ({
       salt: medicine.salt,
       hsnCode: medicine.hsn_code,
       schedule: medicine.schedule,
+      productType: medicine.product_type,
       purchaseUnitType: medicine.purchase_unit_type,
       gst: String(medicine.gst_percent),
       box: last?.box || prev.box,
@@ -167,6 +171,7 @@ export const Purchase = ({
       salt: medicine?.salt || "",
       hsnCode: medicine?.hsn_code || "",
       schedule: medicine?.schedule || "OTC",
+      productType: medicine?.product_type || "",
       purchaseUnitType: medicine?.purchase_unit_type || "Strip",
       gst: String(medicine?.gst_percent ?? defaultGst),
       packSize: String(draft.pack_size || ""),
@@ -212,6 +217,7 @@ export const Purchase = ({
       manufacturer: form.manufacturer.trim(),
       salt: form.salt.trim() || genericName,
       schedule: form.schedule,
+      product_type: form.productType,
       hsn_code: form.hsnCode.trim(),
       gst_percent: Number(form.gst) || 0,
       purchase_unit_type: form.purchaseUnitType,
@@ -351,9 +357,9 @@ export const Purchase = ({
           </Field>
         </div>
 
-        {/* Medicine / Purchase Unit / Drug Schedule */}
+        {/* Medicine / Purchase Unit / Drug Schedule / Product Type */}
         <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-12">
-          <div className="md:col-span-6" ref={searchWrapRef}>
+          <div className="md:col-span-5" ref={searchWrapRef}>
             <label className="field-label">Medicine</label>
             <div className="relative">
               <TextInput
@@ -415,7 +421,7 @@ export const Purchase = ({
             )}
           </div>
 
-          <Field label="Purchase Unit" className="md:col-span-3">
+          <Field label="Purchase Unit" className="md:col-span-2">
             <Select
               value={form.purchaseUnitType}
               onChange={(e) => set("purchaseUnitType", e.target.value as PurchaseUnitType)}
@@ -428,7 +434,7 @@ export const Purchase = ({
             </Select>
           </Field>
 
-          <Field label="Drug Schedule" className="md:col-span-3">
+          <Field label="Drug Schedule" className="md:col-span-2">
             <Select
               value={form.schedule}
               onChange={(e) => set("schedule", e.target.value as DrugSchedule)}
@@ -436,6 +442,17 @@ export const Purchase = ({
               {SCHEDULES.map((s) => (
                 <option key={s} value={s}>
                   {s}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Product Type" className="md:col-span-3">
+            <Select value={form.productType} onChange={(e) => set("productType", e.target.value)}>
+              <option value="">— Select —</option>
+              {productTypeOptions(productTypes, form.productType).map((t) => (
+                <option key={t} value={t}>
+                  {t}
                 </option>
               ))}
             </Select>

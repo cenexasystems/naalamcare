@@ -4,6 +4,7 @@
    ========================================================================== */
 
 import type { Mode } from "./mode";
+import type { InvoicePromo } from "./promo";
 export type { Mode } from "./mode";
 
 /** Server actions return this instead of throwing, so messages survive production builds. */
@@ -30,6 +31,8 @@ export type Medicine = {
   /** Salt composition shown on the billing card */
   salt: string;
   schedule: DrugSchedule;
+  /** Tablet / Injection / General / … (Settings → Product Types); "" = not set */
+  product_type: string;
   hsn_code: string;
   gst_percent: number;
   purchase_unit_type: PurchaseUnitType;
@@ -153,6 +156,8 @@ export type BillItem = {
   brand_name: string;
   manufacturer: string;
   schedule: DrugSchedule;
+  /** Tablet / Injection / General / … (Settings → Product Types); "" = not set */
+  product_type: string;
   hsn_code: string;
   batch_no: string;
   mfg_date: string;
@@ -236,6 +241,8 @@ export type CartLine = {
   manufacturer: string;
   salt: string;
   schedule: DrugSchedule;
+  /** Tablet / Injection / General / … (Settings → Product Types); "" = not set */
+  product_type: string;
   hsn_code: string;
   batch_no: string;
   mfg_date: string;
@@ -278,6 +285,8 @@ export type ShopSettings = {
   default_gst: number;
   low_stock_threshold: number;
   expiry_alert_months: number;
+  /** Product types offered for medicines (Settings → Product Types) */
+  product_types: string[];
 };
 
 export type Store = {
@@ -320,6 +329,8 @@ export type ModeSettings = {
   bill_offers: BillOffer[];
   enforce_moq: boolean;
   invoice_terms: string;
+  /** Offer pop-up shown on the customer invoice link */
+  invoice_promo: InvoicePromo;
   /** This mode's GSTIN and drug licence number, printed on its invoices */
   gstin: string;
   dl_no: string;

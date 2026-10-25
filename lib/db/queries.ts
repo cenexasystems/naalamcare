@@ -15,6 +15,7 @@ import type {
   LedgerData,
   ReconciliationSummary,
   StockMovement,
+  SalesReturn,
 } from "../types";
 import type { Mode } from "../mode";
 import {
@@ -156,6 +157,16 @@ export async function getBill(id: string): Promise<Bill | null> {
   if (!rows.length) return null;
   const items = await db.select().from(schema.billItems).where(eq(schema.billItems.billId, id));
   return mapBill(rows[0], items);
+}
+
+/** Returns recorded against one bill, oldest first (printed on its invoice). */
+export async function getBillReturns(billId: string): Promise<SalesReturn[]> {
+  const rows = await db
+    .select()
+    .from(schema.salesReturns)
+    .where(eq(schema.salesReturns.billId, billId))
+    .orderBy(asc(schema.salesReturns.createdAt));
+  return rows.map(mapSalesReturn);
 }
 
 export async function getSettings(): Promise<ShopSettings | null> {

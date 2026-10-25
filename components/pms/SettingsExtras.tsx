@@ -11,6 +11,8 @@ import {
   getLoginPasscodeStatus,
   listUsers,
   resetLoginPasscode,
+  saveInvoicePromo,
+  saveProductTypes,
   saveModeSettings,
   saveUser,
   type AppUser,
@@ -18,6 +20,8 @@ import {
 import { Button, Card, Field, Modal, Pill, Select, TextInput } from "./ui";
 import { act, useMode, useModeState } from "./mode-context";
 import { useReconciliation } from "./data";
+import { PromoCard } from "./InvoicePromoPopup";
+import { normalisePromo, type InvoicePromo, type PromoGroup, type PromoRow } from "@/lib/promo";
 
 const ALL_METHODS: PaymentMethod[] = ["Cash", "UPI", "Card", "Bank Transfer", "Cheque"];
 type Draft = {
@@ -250,7 +254,7 @@ export const ModeSettingsCard = ({
           onChange={(e) => set({ invoice_terms: e.target.value })}
           rows={3}
           className="field h-auto py-2"
-          placeholder={"Goods once sold will not be taken back.\nPlease check Batch No, Qty, Exp before taking delivery."}
+          placeholder={"Please check your bill, product expiry, quantity and batch before leaving.\nProduct replacement within 7 days."}
         />
       </Field>
 
@@ -267,6 +271,225 @@ export const ModeSettingsCard = ({
    Reconciliation — legacy rows from before the retail / wholesale split.
    Nothing is assigned automatically; the admin chooses.
    ------------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------------
+   Product types — Tablet, Injection, Cartridge… offered on every medicine.
+   ------------------------------------------------------------------------ */
+
+export const ProductTypesCard = ({
+  types: initial,
+  onChanged,
+}: {
+  types: string[];
+  onChanged: (message?: string) => void;
+}) => {
+  const [types, setTypes] = useState<string[]>(initial);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const add = () => {
+    const name = draft.trim();
+    if (!name) return;
+    if (!types.some((t) => t.toLowerCase() === name.toLowerCase())) setTypes([...types, name]);
+    setDraft("");
+  };
+
+  const save = async () => {
+    setSaving(true);
+    const res = await act(saveProductTypes(types));
+    setSaving(false);
+    if (res.ok) {
+      setTypes(res.data);
+      onChanged("Product types saved.");
+    }
+  };
+
+  return (
+    <Card className="mt-4 p-5">
+      <h3 className="mb-1 text-[15px] font-bold text-gray-900">Product Types</h3>
+      <p className="mb-4 text-[12px] text-gray-500">
+        Choose one for each medicine (Inventory or Purchase). It prints in the Type column of bills and invoices. Shared
+        by retail and wholesale.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {types.map((t) => (
+          <span
+            key={t}
+            className="flex items-center gap-1.5 rounded-lg border border-[#e3e7ea] bg-[#fafbfc] py-1.5 pl-3 pr-1.5 text-[13px] font-semibold text-gray-800"
+          >
+            {t}
+            <button
+              onClick={() => setTypes(types.filter((x) => x !== t))}
+              aria-label={`Remove ${t}`}
+              className="cursor-pointer rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </span>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <TextInput
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+          placeholder="New type, e.g. Syrup"
+          className="max-w-[240px]"
+        />
+        <Button variant="ghost" className="py-2 text-[13px]" onClick={add}>
+          <Plus className="h-4 w-4" /> Add
+        </Button>
+        <Button className="ml-auto py-2 text-[13px]" onClick={save} disabled={saving}>
+          <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save types"}
+        </Button>
+      </div>
+    </Card>
+  );
+};
+
+/* ------------------------------------------------------------------------
+   Invoice offer pop-up — shown to customers who open their invoice link.
+   ------------------------------------------------------------------------ */
+
+export const InvoicePromoCard = ({
+  settings,
+  shopName,
+  onChanged,
+}: {
+  settings: ModeSettings;
+  shopName: string;
+  onChanged: (message?: string) => void;
+}) => {
+  const mode = useMode();
+  const [promo, setPromo] = useState<InvoicePromo>(settings.invoice_promo);
+  const [preview, setPreview] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const patch = (p: Partial<InvoicePromo>) => setPromo({ ...promo, ...p });
+  const setGroup = (gi: number, g: Partial<PromoGroup>) =>
+    patch({ groups: promo.groups.map((x, i) => (i === gi ? { ...x, ...g } : x)) });
+  const setRow = (gi: number, ri: number, r: Partial<PromoRow>) =>
+    setGroup(gi, { rows: promo.groups[gi].rows.map((x, i) => (i === ri ? { ...x, ...r } : x)) });
+
+  const save = async () => {
+    setSaving(true);
+    const res = await act(saveInvoicePromo(mode, promo));
+    setSaving(false);
+    if (res.ok) onChanged(promo.enabled ? "Offer pop-up saved and switched on." : "Offer pop-up saved (switched off).");
+  };
+
+  return (
+    <Card className="mt-4 p-5">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-[15px] font-bold text-gray-900">Invoice Offer Pop-up</h3>
+        <label className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-gray-800">
+          <input
+            type="checkbox"
+            checked={promo.enabled}
+            onChange={(e) => patch({ enabled: e.target.checked })}
+            className="h-4 w-4 accent-[var(--c-primary)]"
+          />
+          Show to customers
+        </label>
+      </div>
+      <p className="mb-4 text-[12px] text-gray-500">
+        Pops up when a customer opens the {mode} invoice link you send them on WhatsApp. They close it with ✕. Staff
+        never see it and it is not printed.
+      </p>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_1fr_120px]">
+        <Field label="Big title">
+          <TextInput value={promo.title} onChange={(e) => patch({ title: e.target.value })} placeholder="OFFERS" />
+        </Field>
+        <Field label="Line under the title">
+          <TextInput value={promo.subtitle} onChange={(e) => patch({ subtitle: e.target.value })} />
+        </Field>
+        <Field label="Card colour">
+          <input
+            type="color"
+            value={promo.color}
+            onChange={(e) => patch({ color: e.target.value })}
+            className="h-[42px] w-full cursor-pointer rounded-lg border border-[#d8dde3] bg-white p-1"
+          />
+        </Field>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {promo.groups.map((group, gi) => (
+          <div key={gi} className="rounded-lg border border-[#e5e7eb] p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <TextInput
+                value={group.heading}
+                onChange={(e) => setGroup(gi, { heading: e.target.value })}
+                placeholder="Heading, e.g. Tablets"
+                className="font-semibold"
+              />
+              <button
+                onClick={() => patch({ groups: promo.groups.filter((_, i) => i !== gi) })}
+                aria-label="Remove section"
+                className="cursor-pointer rounded-md p-2 text-gray-500 hover:bg-red-50 hover:text-red-600"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              {group.rows.map((row, ri) => (
+                <div key={ri} className="flex items-center gap-2">
+                  <TextInput
+                    value={row.label}
+                    onChange={(e) => setRow(gi, ri, { label: e.target.value })}
+                    placeholder="Above ₹999"
+                  />
+                  <TextInput
+                    value={row.discount}
+                    onChange={(e) => setRow(gi, ri, { discount: e.target.value })}
+                    placeholder="22% OFF"
+                    className="w-[110px] shrink-0"
+                  />
+                  <button
+                    onClick={() => setGroup(gi, { rows: group.rows.filter((_, i) => i !== ri) })}
+                    aria-label="Remove offer"
+                    className="cursor-pointer rounded-md p-2 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => setGroup(gi, { rows: [...group.rows, { label: "", discount: "" }] })}
+              className="mt-2 flex cursor-pointer items-center gap-1 text-[12px] font-semibold text-[var(--c-deep)] hover:underline"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add offer
+            </button>
+          </div>
+        ))}
+      </div>
+      <Button
+        variant="ghost"
+        className="mt-3 py-2 text-[13px]"
+        onClick={() => patch({ groups: [...promo.groups, { heading: "", rows: [{ label: "", discount: "" }] }] })}
+      >
+        <Plus className="h-4 w-4" /> Add section
+      </Button>
+
+      <Field label="Small print" className="mt-4">
+        <TextInput value={promo.footnote} onChange={(e) => patch({ footnote: e.target.value })} placeholder="*T&C apply." />
+      </Field>
+
+      <div className="mt-5 flex flex-wrap justify-end gap-2">
+        <Button variant="ghost" onClick={() => setPreview(true)}>
+          Preview
+        </Button>
+        <Button onClick={save} disabled={saving}>
+          <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save pop-up"}
+        </Button>
+      </div>
+
+      {preview && <PromoCard promo={normalisePromo(promo)} shopName={shopName} onClose={() => setPreview(false)} />}
+    </Card>
+  );
+};
 
 export const ReconciliationCard = ({ onChanged }: { onChanged: (message?: string) => void }) => {
   const state = useModeState();
