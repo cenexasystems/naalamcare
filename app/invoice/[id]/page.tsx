@@ -164,7 +164,8 @@ export default async function InvoicePage({
         <InvoicePromoPopup promo={modeSettings.invoice_promo} shopName={shop?.shop_name || APP_NAME} />
       )}
       <InvoiceFit>
-      <div className="invoice-sheet w-full bg-white p-4 text-black shadow-sm print:p-0">
+      {/* A full A4 page: at least 297mm tall on screen (281mm inside the 8mm print margins); the item grid stretches to fill it. */}
+      <div className="invoice-sheet flex min-h-[297mm] w-full flex-col bg-white p-4 text-black shadow-sm print:min-h-[279mm] print:p-0">
         {/* ---------- Header: shop identity left, GST / DL numbers right ---------- */}
         <div className="flex items-start justify-between gap-6 border-b-2 border-black pb-2">
           <div className="text-[10.5px] leading-[1.35]">
@@ -223,8 +224,9 @@ export default async function InvoicePage({
           </div>
         )}
 
-        {/* ---------- Items grid ---------- */}
-        <table className="w-full border-collapse text-[9.5px] leading-[1.3]">
+        {/* ---------- Items grid (grows to fill the page, column lines run to the bottom) ---------- */}
+        <div className="flex min-h-[60mm] flex-1 flex-col">
+        <table className="h-full w-full flex-1 border-collapse text-[9.5px] leading-[1.3]">
           <thead>
             <tr className="bg-[#d9d9d9]">
               {["No", "Type", "Product Name", "Pack", "Mfr", "Batch", "Exp", "MRP", "Qty", "Rate", "Disc", "GST%", "Amount", "HSN"].map((h) => (
@@ -234,7 +236,7 @@ export default async function InvoicePage({
           </thead>
           <tbody>
             {bill.items.map((item, index) => (
-              <tr key={item.id} className="align-top">
+              <tr key={item.id} className="h-px align-top">
                 <td className="border border-black px-1 py-0.5 text-center">{index + 1}</td>
                 <td className="border border-black px-1 py-0.5 text-center">{item.product_type || item.purchase_unit_type}</td>
                 <td className="border border-black px-1 py-0.5">
@@ -255,12 +257,14 @@ export default async function InvoicePage({
                 <td className="border border-black px-1 py-0.5 text-center">{item.hsn_code}</td>
               </tr>
             ))}
-            <tr>
-              <td colSpan={13} className="border border-black px-1 py-1" />
-              <td className="border border-black" />
+            <tr className="h-full">
+              {Array.from({ length: 14 }, (_, i) => (
+                <td key={i} className="border-x border-b border-black" />
+              ))}
             </tr>
           </tbody>
         </table>
+        </div>
 
         {/* ---------- Returns against this bill ---------- */}
         {returns.length > 0 && (
