@@ -18,7 +18,8 @@ import type {
 } from "../types";
 import { isMode, type Mode } from "../mode";
 import { normalisePromo } from "../promo";
-import { parseProductTypes } from "../product-types";
+import { normaliseTypeDiscounts } from "../type-discounts";
+import { parseProductTypes, parsePurchaseUnits } from "../product-types";
 
 const modeOrNull = (value: unknown): Mode | null => (isMode(value) ? value : null);
 
@@ -92,6 +93,8 @@ export const mapCustomer = (row: any): Customer => ({
   address: row.address,
   doctor_name: row.doctorName,
   email: row.email || "",
+  contact_person: row.contactPerson || "",
+  dl_no: row.dlNo || "",
   age: row.age || "",
   gender: row.gender || "",
   quick_bill: row.quickBill,
@@ -195,6 +198,7 @@ export const mapSettings = (row: any): ShopSettings => ({
   low_stock_threshold: row.lowStockThreshold,
   expiry_alert_months: row.expiryAlertMonths,
   product_types: parseProductTypes(row.productTypes),
+  purchase_units: parsePurchaseUnits(row.purchaseUnits),
 });
 
 export const mapModeSettings = (row: any, mode: Mode): ModeSettings => ({
@@ -220,6 +224,7 @@ export const mapModeSettings = (row: any, mode: Mode): ModeSettings => ({
   enforce_moq: Boolean(row?.enforceMoq ?? mode === "wholesale"),
   invoice_terms: row?.invoiceTerms ?? "",
   invoice_promo: normalisePromo(row?.invoicePromo),
+  type_discounts: normaliseTypeDiscounts(row?.typeDiscounts),
   gstin: row?.gstin ?? "",
   dl_no: row?.dlNo ?? "",
   shop_name: row?.shopName ?? "",

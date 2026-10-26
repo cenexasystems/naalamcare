@@ -159,6 +159,12 @@ export async function getBill(id: string): Promise<Bill | null> {
   return mapBill(rows[0], items);
 }
 
+export async function getSalesReturn(id: string): Promise<SalesReturn | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const rows = await db.select().from(schema.salesReturns).where(eq(schema.salesReturns.id, id)).limit(1);
+  return rows.length ? mapSalesReturn(rows[0]) : null;
+}
+
 /** Returns recorded against one bill, oldest first (printed on its invoice). */
 export async function getBillReturns(billId: string): Promise<SalesReturn[]> {
   const rows = await db

@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { Save, Plus, Trash2, GitMerge, Pencil } from "lucide-react";
-import type { BillOffer, DiscountTier, ModeSettings, PaymentMethod } from "@/lib/types";
+import type { ActionResult, BillOffer, DiscountTier, ModeSettings, PaymentMethod } from "@/lib/types";
 import { MODE_LABEL, type Mode } from "@/lib/mode";
 import { amount, monthShort } from "@/lib/format";
 import {
@@ -12,7 +12,9 @@ import {
   listUsers,
   resetLoginPasscode,
   saveInvoicePromo,
+  savePurchaseUnits,
   saveProductTypes,
+  saveTypeDiscounts,
   saveModeSettings,
   saveUser,
   type AppUser,
@@ -21,6 +23,8 @@ import { Button, Card, Field, Modal, Pill, Select, TextInput } from "./ui";
 import { act, useMode, useModeState } from "./mode-context";
 import { useReconciliation } from "./data";
 import { PromoCard } from "./InvoicePromoPopup";
+import type { TypeDiscountRule } from "@/lib/type-discounts";
+import { productTypeOptions } from "@/lib/product-types";
 import { normalisePromo, type InvoicePromo, type PromoGroup, type PromoRow } from "@/lib/promo";
 
 const ALL_METHODS: PaymentMethod[] = ["Cash", "UPI", "Card", "Bank Transfer", "Cheque"];
@@ -276,11 +280,46 @@ export const ModeSettingsCard = ({
    Product types — Tablet, Injection, Cartridge… offered on every medicine.
    ------------------------------------------------------------------------ */
 
-export const ProductTypesCard = ({
-  types: initial,
+export const ProductTypesCard = ({ types, onChanged }: { types: string[]; onChanged: (message?: string) => void }) => (
+  <NameListCard
+    title="Product Types"
+    description="Choose one for each medicine (Inventory or Purchase). It prints in the Type column of bills and invoices. Shared by retail and wholesale."
+    placeholder="New type, e.g. Syrup"
+    initial={types}
+    save={saveProductTypes}
+    savedMessage="Product types saved."
+    onChanged={onChanged}
+  />
+);
+
+export const PurchaseUnitsCard = ({ units, onChanged }: { units: string[]; onChanged: (message?: string) => void }) => (
+  <NameListCard
+    title="Purchase Units"
+    description="What a batch is bought in — chosen in Purchase and Inventory, with the units per pack beside it. Shared by retail and wholesale."
+    placeholder="New unit, e.g. Tube, Vial"
+    initial={units}
+    save={savePurchaseUnits}
+    savedMessage="Purchase units saved."
+    onChanged={onChanged}
+  />
+);
+
+/** An editable list of names saved shop-wide (product types, purchase units). */
+const NameListCard = ({
+  title,
+  description,
+  placeholder,
+  initial,
+  save: saveList,
+  savedMessage,
   onChanged,
 }: {
-  types: string[];
+  title: string;
+  description: string;
+  placeholder: string;
+  initial: string[];
+  save: (list: string[]) => Promise<ActionResult<string[]>>;
+  savedMessage: string;
   onChanged: (message?: string) => void;
 }) => {
   const [types, setTypes] = useState<string[]>(initial);
@@ -296,21 +335,18 @@ export const ProductTypesCard = ({
 
   const save = async () => {
     setSaving(true);
-    const res = await act(saveProductTypes(types));
+    const res = await act(saveList(types));
     setSaving(false);
     if (res.ok) {
       setTypes(res.data);
-      onChanged("Product types saved.");
+      onChanged(savedMessage);
     }
   };
 
   return (
     <Card className="mt-4 p-5">
-      <h3 className="mb-1 text-[15px] font-bold text-gray-900">Product Types</h3>
-      <p className="mb-4 text-[12px] text-gray-500">
-        Choose one for each medicine (Inventory or Purchase). It prints in the Type column of bills and invoices. Shared
-        by retail and wholesale.
-      </p>
+      <h3 className="mb-1 text-[15px] font-bold text-gray-900">{title}</h3>
+      <p className="mb-4 text-[12px] text-gray-500">{description}</p>
       <div className="flex flex-wrap gap-2">
         {types.map((t) => (
           <span
@@ -333,14 +369,137 @@ export const ProductTypesCard = ({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
-          placeholder="New type, e.g. Syrup"
+          placeholder={placeholder}
           className="max-w-[240px]"
         />
         <Button variant="ghost" className="py-2 text-[13px]" onClick={add}>
           <Plus className="h-4 w-4" /> Add
         </Button>
         <Button className="ml-auto py-2 text-[13px]" onClick={save} disabled={saving}>
-          <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save types"}
+          <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </Card>
+  );
+};
+
+/* ------------------------------------------------------------------------
+   Product-type discounts — automatic % off at billing, banded by how much
+   of that product type is on the bill.
+   ------------------------------------------------------------------------ */
+
+type BandDraft = { from: string; to: string; percent: string };
+type RuleDraft = { type: string; bands: BandDraft[] };
+
+const toDraft = (rules: TypeDiscountRule[]): RuleDraft[] =>
+  rules.map((r) => ({
+    type: r.type,
+    bands: r.bands.map((b) => ({ from: String(b.from), to: b.to ? String(b.to) : "", percent: String(b.percent) })),
+  }));
+
+export const TypeDiscountsCard = ({
+  settings,
+  productTypes,
+  onChanged,
+}: {
+  settings: ModeSettings;
+  productTypes: string[];
+  onChanged: (message?: string) => void;
+}) => {
+  const mode = useMode();
+  const [rules, setRules] = useState<RuleDraft[]>(() => toDraft(settings.type_discounts));
+  const [saving, setSaving] = useState(false);
+
+  const setRule = (ri: number, patch: Partial<RuleDraft>) => setRules(rules.map((r, i) => (i === ri ? { ...r, ...patch } : r)));
+  const setBand = (ri: number, bi: number, patch: Partial<BandDraft>) =>
+    setRule(ri, { bands: rules[ri].bands.map((b, i) => (i === bi ? { ...b, ...patch } : b)) });
+  const unused = productTypes.filter((t) => !rules.some((r) => r.type.toLowerCase() === t.toLowerCase()));
+
+  const save = async () => {
+    setSaving(true);
+    const payload = rules.map((r) => ({
+      type: r.type,
+      bands: r.bands.map((b) => ({ from: Number(b.from) || 0, to: Number(b.to) || 0, percent: Number(b.percent) || 0 })),
+    }));
+    const res = await act(saveTypeDiscounts(mode, payload));
+    setSaving(false);
+    if (res.ok) onChanged("Product-type discounts saved. New bills use them straight away.");
+  };
+
+  return (
+    <Card className="mt-4 p-5">
+      <h3 className="mb-1 text-[15px] font-bold text-gray-900">Product-type Discounts</h3>
+      <p className="mb-4 text-[12px] text-gray-500">
+        Applied automatically when you bill on the {mode} dashboard. The lines of each product type on a bill are added
+        up; that total picks one band and its % comes off those lines. &ldquo;Up to&rdquo; is not included (₹999 – ₹6999
+        means ₹999.00 to ₹6998.99); leave it blank for no upper limit.
+      </p>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {rules.map((rule, ri) => (
+          <div key={ri} className="rounded-lg border border-[#e5e7eb] p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <Select value={rule.type} onChange={(e) => setRule(ri, { type: e.target.value })} className="font-semibold">
+                {productTypeOptions(productTypes, rule.type).map((t) => (
+                  <option key={t} value={t} disabled={t !== rule.type && rules.some((r) => r.type === t)}>
+                    {t}
+                  </option>
+                ))}
+              </Select>
+              <button
+                onClick={() => setRules(rules.filter((_, i) => i !== ri))}
+                aria-label="Remove product type"
+                className="cursor-pointer rounded-md p-2 text-gray-500 hover:bg-red-50 hover:text-red-600"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mb-1 grid grid-cols-[1fr_1fr_80px_32px] gap-2 text-[11px] font-semibold text-gray-500">
+              <span>From ₹</span>
+              <span>Up to ₹</span>
+              <span>% off</span>
+              <span />
+            </div>
+            <div className="space-y-1.5">
+              {rule.bands.map((band, bi) => (
+                <div key={bi} className="grid grid-cols-[1fr_1fr_80px_32px] items-center gap-2">
+                  <TextInput type="number" value={band.from} onChange={(e) => setBand(ri, bi, { from: e.target.value })} placeholder="0" />
+                  <TextInput type="number" value={band.to} onChange={(e) => setBand(ri, bi, { to: e.target.value })} placeholder="No limit" />
+                  <TextInput type="number" value={band.percent} onChange={(e) => setBand(ri, bi, { percent: e.target.value })} placeholder="10" />
+                  <button
+                    onClick={() => setRule(ri, { bands: rule.bands.filter((_, i) => i !== bi) })}
+                    aria-label="Remove band"
+                    className="cursor-pointer rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => {
+                const last = rule.bands.at(-1);
+                setRule(ri, { bands: [...rule.bands, { from: last?.to || "", to: "", percent: "" }] });
+              }}
+              className="mt-2 flex cursor-pointer items-center gap-1 text-[12px] font-semibold text-[var(--c-deep)] hover:underline"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add band
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <Button
+          variant="ghost"
+          className="py-2 text-[13px]"
+          disabled={!unused.length}
+          onClick={() => setRules([...rules, { type: unused[0], bands: [{ from: "0", to: "", percent: "" }] }])}
+        >
+          <Plus className="h-4 w-4" /> Add product type
+        </Button>
+        <Button onClick={save} disabled={saving}>
+          <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save discounts"}
         </Button>
       </div>
     </Card>

@@ -4,6 +4,7 @@ import React, { useMemo, useState } from "react";
 import { Download, FileSpreadsheet, Search, Trash2, Eye, Printer } from "lucide-react";
 import type { BatchRow, Bill, Customer, LedgerData, Supplier } from "@/lib/types";
 import { amount, dateSlash, money, monthShort, todayIso } from "@/lib/format";
+import { periodRange, type Period } from "@/lib/period";
 import { deleteBill } from "@/lib/actions";
 import { BILL_SUMMARY_SHEET, INVENTORY_SHEET, SALES_SHEET } from "./exports";
 import { downloadCsv, downloadExcel } from "@/lib/xlsx";
@@ -12,34 +13,9 @@ import { round2 } from "@/lib/calc";
 import { act, useMode } from "./mode-context";
 import { REPORT_OPTIONS, ReportTable, buildReport, reportSheet, type ReportKind } from "./ReportsExtras";
 
-type Period = "TODAY" | "WEEK" | "MONTH" | "YEAR" | "ALL" | "CUSTOM";
 
-const startOf = (period: Period, from: string, to: string): [string, string] => {
-  const now = new Date();
-  const iso = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  switch (period) {
-    case "TODAY":
-      return [iso(now), iso(now)];
-    case "WEEK": {
-      const start = new Date(now);
-      start.setDate(now.getDate() - 6);
-      return [iso(start), iso(now)];
-    }
-    case "MONTH": {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      return [iso(start), iso(now)];
-    }
-    case "YEAR": {
-      const start = new Date(now.getFullYear(), 0, 1);
-      return [iso(start), iso(now)];
-    }
-    case "CUSTOM":
-      return [from, to];
-    default:
-      return ["0000-01-01", "9999-12-31"];
-  }
-};
+/** Calendar ranges shared with the dashboard: week = Monday–Sunday, month = 1st–last day, year = Jan–Dec. */
+const startOf = (period: Period, from: string, to: string): [string, string] => periodRange(period, from, to);
 
 export const Reports = ({
   bills,

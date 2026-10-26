@@ -232,13 +232,16 @@ export const scheduleIsOtc = (schedule: string): boolean => schedule === "OTC";
 export const unitNoun = (unitType: string, packSize: number): string => {
   if (unitType === "Strip") return packSize > 1 ? "Tablets" : "Tablet";
   if (unitType === "Bottle") return "Bottles";
-  return "Pieces";
+  if (unitType === "Piece" || !unitType) return "Pieces";
+  // Units added in Settings: a pack of one is the unit itself ("Tubes"), otherwise loose units.
+  return packSize > 1 ? "Units" : packNoun(unitType);
 };
 
 export const packNoun = (unitType: string): string => {
   if (unitType === "Strip") return "Strips";
   if (unitType === "Bottle") return "Bottles";
-  return "Pieces";
+  if (unitType === "Piece" || !unitType) return "Pieces";
+  return /s$/i.test(unitType) ? unitType : `${unitType}s`;
 };
 
 /** What a billing quantity counts: single units, whole packs (strips) or whole boxes. */

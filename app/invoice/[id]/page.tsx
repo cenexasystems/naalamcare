@@ -92,6 +92,8 @@ export default async function InvoicePage({
   // Returns change what the customer finally paid: the invoice lists them and shows the revised total.
   const returns = bill && bill.returned_amount > 0 ? await getBillReturns(bill.id) : [];
   const revisedTotal = bill ? Math.max(0, bill.grand_total - bill.returned_amount) : 0;
+  /** MRP value of everything on the bill minus what the customer paid: every discount together. */
+  const savedAmount = bill ? Math.max(0, Math.round((bill.sub_total - bill.grand_total) * 100) / 100) : 0;
   const terms = (modeSettings?.invoice_terms || "")
     .split("\n")
     .map((t) => t.trim())
@@ -183,7 +185,7 @@ export default async function InvoicePage({
             <p>{wholesale ? "Pharmacy Name" : "Customer Name"} : <span className="font-bold">{bill.customer_name || ""}</span></p>
             <p className="mt-3">Mob : {bill.customer_phone || ""}</p>
             <p>Cust. ID : {bill.customer_id || ""}</p>
-            <p>Email : {bill.customer_email}</p>
+            <p>Address : {bill.customer_address}</p>
             <p>
               Age / Gender : {[bill.customer_age, GENDER[bill.customer_gender] || bill.customer_gender].filter(Boolean).join(" / ")}
             </p>
@@ -208,24 +210,24 @@ export default async function InvoicePage({
           </div>
         </div>
 
-        {/* ---------- Customer / invoice-to block ---------- */}
-        <div className="border-b border-black py-1.5 text-[10.5px] leading-[1.45]">
-          <p className="font-bold uppercase underline">{bill.customer_name || "Walk-in Customer"}</p>
-          {bill.customer_address && <p>{bill.customer_address}</p>}
-          {bill.doctor_name && <p>Ph: {bill.doctor_name}</p>}
-          <p className="mt-1">Tin No. : &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; GST No. : {bill.customer_gstin}</p>
-          {bill.shipping_address && bill.shipping_address !== bill.customer_address && (
-            <p className="mt-1">
-              <span className="font-bold">Ship to :</span> {bill.shipping_address}
-            </p>
-          )}
-        </div>
+        {/* ---------- Wholesale only: the pharmacy's GSTIN and ship-to (retail shows the customer above) ---------- */}
+        {wholesale && (
+          <div className="border-b border-black py-1.5 text-[10.5px] leading-[1.45]">
+            <p className="font-bold uppercase underline">{bill.customer_name}</p>
+            {bill.customer_gstin && <p className="mt-1">GST No. : {bill.customer_gstin}</p>}
+            {bill.shipping_address && bill.shipping_address !== bill.customer_address && (
+              <p className="mt-1">
+                <span className="font-bold">Ship to :</span> {bill.shipping_address}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* ---------- Items grid ---------- */}
         <table className="w-full border-collapse text-[9.5px] leading-[1.3]">
           <thead>
             <tr className="bg-[#d9d9d9]">
-              {["No", "Type", "Product Name", "Pack", "Mfr", "Batch", "Exp", "MRP", "Qty", "Free", "Rate", "Disc", "GST%", "Amount", "HSN"].map((h) => (
+              {["No", "Type", "Product Name", "Pack", "Mfr", "Batch", "Exp", "MRP", "Qty", "Rate", "Disc", "GST%", "Amount", "HSN"].map((h) => (
                 <th key={h} className="border border-black px-1 py-1 text-center font-bold">{h}</th>
               ))}
             </tr>
@@ -234,11 +236,11 @@ export default async function InvoicePage({
             {bill.items.map((item, index) => (
               <tr key={item.id} className="align-top">
                 <td className="border border-black px-1 py-0.5 text-center">{index + 1}</td>
-                <td className="border border-black px-1 py-0.5 text-center">{item.product_type}</td>
+                <td className="border border-black px-1 py-0.5 text-center">{item.product_type || item.purchase_unit_type}</td>
                 <td className="border border-black px-1 py-0.5">
                   <p className="font-bold uppercase">{item.generic_name}</p>
                   {item.brand_name && <p>{item.brand_name}</p>}
-                  <p className="text-[8.5px]">{item.schedule ? `[${item.schedule}]` : ""} Exp: {monthShort(item.exp_date)}</p>
+                  {item.schedule && <p className="text-[8.5px]">[{item.schedule}]</p>}
                 </td>
                 <td className="border border-black px-1 py-0.5 text-center">{packLabel(item)}</td>
                 <td className="border border-black px-1 py-0.5 text-center">{mfrLabel(item)}</td>
@@ -246,7 +248,6 @@ export default async function InvoicePage({
                 <td className="border border-black px-1 py-0.5 text-center">{monthShort(item.exp_date)}</td>
                 <td className="border border-black px-1 py-0.5 text-right">{amount(item.mrp_per_unit)}</td>
                 <td className="border border-black px-1 py-0.5 text-right">{item.qty}</td>
-                <td className="border border-black px-1 py-0.5 text-right">0</td>
                 <td className="border border-black px-1 py-0.5 text-right">{amount(item.per_unit_price)}</td>
                 <td className="border border-black px-1 py-0.5 text-center">{amount(discPercent(item))}</td>
                 <td className="border border-black px-1 py-0.5 text-center">{amount(item.gst_percent)}</td>
@@ -255,7 +256,7 @@ export default async function InvoicePage({
               </tr>
             ))}
             <tr>
-              <td colSpan={14} className="border border-black px-1 py-1" />
+              <td colSpan={13} className="border border-black px-1 py-1" />
               <td className="border border-black" />
             </tr>
           </tbody>
@@ -290,6 +291,16 @@ export default async function InvoicePage({
                 )}
               </tbody>
             </table>
+            {!sharedView && (
+              <p className="no-print border-t border-black px-1 py-1 print:hidden">
+                Return bills:{" "}
+                {returns.map((r) => (
+                  <Link key={r.id} href={`/return/${r.id}`} className="mr-3 font-bold text-[#1f6feb] underline">
+                    R-{r.id.replace(/-/g, "").slice(0, 8).toUpperCase()}
+                  </Link>
+                ))}
+              </p>
+            )}
           </div>
         )}
 
@@ -327,10 +338,12 @@ export default async function InvoicePage({
                   <td className="border border-black px-1 py-0.5">Change Returned</td>
                   <td className="border border-black px-1 py-0.5 text-right">{amount(Math.max(0, bill.change_amount))}</td>
                 </tr>
-                <tr>
-                  <td className="border border-black px-1 py-0.5">Txn Ref No.</td>
-                  <td className="border border-black px-1 py-0.5 text-right">{bill.txn_ref}</td>
-                </tr>
+                {savedAmount > 0 && (
+                  <tr>
+                    <td className="border border-black px-1 py-0.5 font-bold">You Saved (vs MRP)</td>
+                    <td className="border border-black px-1 py-0.5 text-right font-bold">{amount(savedAmount)}</td>
+                  </tr>
+                )}
                 {bill.returned_amount > 0 && (
                   <>
                     <tr>
@@ -354,6 +367,8 @@ export default async function InvoicePage({
           </div>
         </div>
         <div className="inv-break mt-1 border border-black text-[9.5px]">
+          {/* GST-rate breakup: wholesale (B2B) invoices only */}
+          {wholesale && (
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-[#d9d9d9]">
@@ -390,6 +405,7 @@ export default async function InvoicePage({
               </tr>
             </tbody>
           </table>
+          )}
           <div className="flex items-center justify-between border-t border-black px-1 py-0.5">
             <span>Due bills :</span>
             <span className="font-bold">{bill.returned_amount > 0 ? "Revised Net Amount" : "Net Amount"}</span>
@@ -403,6 +419,12 @@ export default async function InvoicePage({
             <span className="text-[17px] font-bold">{money(revisedTotal)}</span>
           </div>
         </div>
+
+        {savedAmount > 0 && (
+          <p className="inv-break mt-1 rounded border border-black px-2 py-1 text-center text-[11px] font-bold">
+            You saved {money(savedAmount)} on this bill (MRP {money(bill.sub_total)} − you paid {money(bill.grand_total)})
+          </p>
+        )}
 
         {/* ---------- Amount in words ---------- */}
         <p className="mt-1 text-[9.5px] uppercase">{amountInWords(revisedTotal)}</p>

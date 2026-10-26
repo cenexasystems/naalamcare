@@ -404,7 +404,7 @@ const ReceiveModal = ({ bill, onClose, onDone }: { bill: Bill | null; onClose: (
   );
 };
 
-const ReturnModal = ({
+export const ReturnModal = ({
   bill,
   onClose,
   onDone,
@@ -455,10 +455,10 @@ const ReturnModal = ({
               setSaving(false);
               if (res.ok) {
                 onDone(
-                  `Return saved — ${money(res.data.amount)}${res.data.refund > 0 ? `, refund ${money(res.data.refund)}` : ""}. Revised bill opened.`,
+                  `Return saved — ${money(res.data.amount)}${res.data.refund > 0 ? `, refund ${money(res.data.refund)}` : ""}. Return bill opened.`,
                 );
-                // The invoice now lists the return and the revised net amount — open it to print / send.
-                const url = `/invoice/${encodeURIComponent(bill.id)}`;
+                // Open the return bill (credit note) to print / hand over; it links to the revised invoice.
+                const url = `/return/${res.data.id}`;
                 // iPhone blocks new tabs opened after an await — fall back to this tab.
                 if (!window.open(url, "_blank")) window.location.href = url;
               }

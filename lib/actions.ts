@@ -6,7 +6,8 @@ import { and, asc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { formatBillId, formatCustomerId, formatPoNumber } from "./ids";
 import { calcBillOffer, calcBillTotals, round2 } from "./calc";
 import { normalisePromo } from "./promo";
-import { parseProductTypes } from "./product-types";
+import { calcTypeDiscounts, normaliseTypeDiscounts } from "./type-discounts";
+import { parseProductTypes, parsePurchaseUnits } from "./product-types";
 import {
   AuthError,
   builtInPasscodeStatus,
@@ -739,6 +740,8 @@ const customerValues = (payload: any) => ({
   quickBill: Boolean(payload.quick_bill),
   businessType: str(payload.business_type),
   gstin: str(payload.gstin).toUpperCase(),
+  contactPerson: str(payload.contact_person),
+  dlNo: str(payload.dl_no).toUpperCase(),
   shippingAddress: str(payload.shipping_address),
   creditLimit: String(Math.max(0, round2(num(payload.credit_limit)))),
   creditDays: Math.max(0, int(payload.credit_days)),
@@ -933,6 +936,38 @@ export async function saveProductTypes(types: string[]): Promise<ActionResult<st
     if (list.length > 40) fail("Keep the list to 40 product types or fewer.");
     await db.update(schema.settings).set({ productTypes: JSON.stringify(list) }).where(eq(schema.settings.id, 1));
     return list;
+  });
+}
+
+/** Settings → Purchase Units: the units a batch can be bought in (shared by both dashboards). */
+export async function savePurchaseUnits(units: string[]): Promise<ActionResult<string[]>> {
+  return run(async () => {
+    await requireAdmin();
+    const list = parsePurchaseUnits(Array.isArray(units) ? units : []);
+    if (!list.length) fail("Keep at least one purchase unit.");
+    if (list.length > 40) fail("Keep the list to 40 purchase units or fewer.");
+    await db.update(schema.settings).set({ purchaseUnits: JSON.stringify(list) }).where(eq(schema.settings.id, 1));
+    return list;
+  });
+}
+
+/** Settings → Product-type Discounts: automatic % off by product type, applied when bills are saved. */
+export async function saveTypeDiscounts(mode: Mode, payload: unknown): Promise<ActionResult<null>> {
+  return run(async () => {
+    await requireMode(mode, { admin: true });
+    const rules = normaliseTypeDiscounts(payload);
+    for (const rule of rules)
+      for (let i = 1; i < rule.bands.length; i += 1) {
+        const prev = rule.bands[i - 1];
+        if (prev.to === 0 || prev.to > rule.bands[i].from)
+          fail(`${rule.type}: the bands overlap — each amount must fall in exactly one band.`);
+      }
+    const values = { typeDiscounts: JSON.stringify(rules) };
+    await db
+      .insert(schema.modeSettings)
+      .values({ mode, ...values })
+      .onConflictDoUpdate({ target: schema.modeSettings.mode, set: values });
+    return null;
   });
 }
 
@@ -1145,9 +1180,14 @@ export async function submitBill(
       const totals = calcBillTotals(
         priced.map((p) => ({ qty: p.qty, mrp_per_unit: p.mrpPerUnit, per_unit_price: p.perUnit, gst_percent: num(p.batch.gstPercent) })),
       );
-      // Bill offers are applied here from the saved settings, never trusted from the counter.
-      const offerDiscount = calcBillOffer(settings.bill_offers, totals.grandTotal).discount;
-      const afterOffer = round2(totals.grandTotal - offerDiscount);
+      // Product-type discounts and bill offers come from the saved settings, never from the counter.
+      const typeDiscount = calcTypeDiscounts(
+        settings.type_discounts,
+        priced.map((p) => ({ product_type: p.med.productType, amount: round2(p.perUnit * p.qty) })),
+      ).total;
+      const afterType = round2(totals.grandTotal - typeDiscount);
+      const offerDiscount = calcBillOffer(settings.bill_offers, afterType).discount;
+      const afterOffer = round2(afterType - offerDiscount);
       const extraDiscount = Math.min(Math.max(0, round2(num(payload.extra_discount))), afterOffer);
       if (settings.max_discount_percent > 0 && extraDiscount > round2((totals.grandTotal * settings.max_discount_percent) / 100) + 0.01)
         fail(`The extra discount can't be more than ${settings.max_discount_percent}% of the bill.`);
@@ -1203,7 +1243,7 @@ export async function submitBill(
         txnRef: str(payload.txn_ref),
         billDate,
         subTotal: totals.subTotal.toString(),
-        discount: round2(totals.discount + offerDiscount + extraDiscount).toString(),
+        discount: round2(totals.discount + typeDiscount + offerDiscount + extraDiscount).toString(),
         taxableAmount: totals.taxableAmount.toString(),
         gstAmount: totals.gstAmount.toString(),
         gstPercent: totals.gstPercent.toString(),
@@ -1332,7 +1372,7 @@ export async function deleteBill(mode: Mode, billId: string): Promise<ActionResu
 export async function createSalesReturn(
   mode: Mode,
   payload: { bill_id: string; items: { bill_item_id: string; qty: number }[]; refund_method?: string; reason?: string },
-): Promise<ActionResult<{ amount: number; refund: number; adjusted: number }>> {
+): Promise<ActionResult<{ id: string; amount: number; refund: number; adjusted: number }>> {
   return run(async () => {
     await requireMode(mode);
     const actor = await actorOf();
@@ -1410,7 +1450,7 @@ export async function createSalesReturn(
           returnedAmount: String(round2(num(bill.returnedAmount) + amount)),
         })
         .where(eq(schema.bills.id, bill.id));
-      await tx.insert(schema.salesReturns).values({
+      const saved = await tx.insert(schema.salesReturns).values({
         mode,
         billId: bill.id,
         customerId: bill.customerId,
@@ -1420,8 +1460,8 @@ export async function createSalesReturn(
         refundAmount: String(refund),
         refundMethod: str(payload.refund_method) || "Cash",
         reason: str(payload.reason),
-      });
-      return { amount, refund, adjusted: round2(adjusted) };
+      }).returning({ id: schema.salesReturns.id });
+      return { id: saved[0].id, amount, refund, adjusted: round2(adjusted) };
     });
   });
 }

@@ -12,7 +12,7 @@ import {
 } from "@/lib/calc";
 import { amount, monthShort, packNoun, todayIso, unitNoun } from "@/lib/format";
 import { useSettings } from "./data";
-import { DEFAULT_PRODUCT_TYPES, productTypeOptions } from "@/lib/product-types";
+import { DEFAULT_PRODUCT_TYPES, DEFAULT_PURCHASE_UNITS, productTypeOptions } from "@/lib/product-types";
 import { saveBatch, saveMedicine, saveSupplier } from "@/lib/actions";
 import { Button, Card, Field, ScreenHeading, Select, TextInput } from "./ui";
 import { act, useMode } from "./mode-context";
@@ -21,7 +21,6 @@ import { PurchaseOrders, PurchaseReturns, type ReceiveDraft } from "./PurchaseEx
 export type { ReceiveDraft } from "./PurchaseExtras";
 
 /** Dropdown options requested by the client (slide 9 / 10) */
-const PURCHASE_UNITS: PurchaseUnitType[] = ["Strip", "Piece", "Bottle"];
 const SCHEDULES: DrugSchedule[] = ["H", "H1", "X", "NRX", "OTC", "General"];
 
 const blankForm = (defaultGst = 12) => ({
@@ -70,6 +69,7 @@ export const Purchase = ({
   const [saving, setSaving] = useState(false);
   const { data: settings } = useSettings();
   const productTypes = settings?.product_types ?? DEFAULT_PRODUCT_TYPES;
+  const purchaseUnits = settings?.purchase_units ?? DEFAULT_PURCHASE_UNITS;
   const defaultGst = settings?.default_gst ?? 12;
   const [form, setForm] = useState(() => blankForm(defaultGst));
 
@@ -426,7 +426,7 @@ export const Purchase = ({
               value={form.purchaseUnitType}
               onChange={(e) => set("purchaseUnitType", e.target.value as PurchaseUnitType)}
             >
-              {PURCHASE_UNITS.map((unit) => (
+              {productTypeOptions(purchaseUnits, form.purchaseUnitType).map((unit) => (
                 <option key={unit} value={unit}>
                   {unit}
                 </option>
@@ -556,7 +556,6 @@ export const Purchase = ({
                 placeholder="2"
               />
             </Field>
-            <CalcReadonly label="Stock Added" value={stockAdded ? String(stockAdded) : "—"} />
           </CalcGroup>
 
           <CalcGroup label="You pay — supplier" tone="blue">

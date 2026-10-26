@@ -116,6 +116,9 @@ export const customers = pgTable("customers", {
   address: text("address").notNull().default(""),
   doctorName: text("doctor_name").notNull().default(""),
   email: text("email").notNull().default(""),
+  /** Wholesale: the distributor's contact person and drug licence number */
+  contactPerson: text("contact_person").notNull().default(""),
+  dlNo: text("dl_no").notNull().default(""),
   age: text("age").notNull().default(""),
   gender: text("gender").notNull().default(""),
   quickBill: boolean("quick_bill").notNull().default(false),
@@ -243,6 +246,8 @@ export const settings = pgTable("settings", {
   expiryAlertMonths: integer("expiry_alert_months").notNull().default(6),
   /** JSON list of product types offered when adding medicines ("" = the defaults) */
   productTypes: text("product_types").notNull().default(""),
+  /** JSON list of purchase units (Strip, Piece, Bottle…) ("" = the defaults) */
+  purchaseUnits: text("purchase_units").notNull().default(""),
 });
 
 /* --------------------------------------------------------------------------
@@ -270,6 +275,8 @@ export const modeSettings = pgTable("mode_settings", {
   invoiceTerms: text("invoice_terms").notNull().default(""),
   /** JSON: offer pop-up on customer invoice links (see lib/promo.ts); "" = default, switched off */
   invoicePromo: text("invoice_promo").notNull().default(""),
+  /** JSON: automatic discounts by product type (see lib/type-discounts.ts) */
+  typeDiscounts: text("type_discounts").notNull().default("[]"),
   /** GSTIN and drug licence number printed on this mode's invoices. */
   gstin: text("gstin").notNull().default(""),
   dlNo: text("dl_no").notNull().default(""),

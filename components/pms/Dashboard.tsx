@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   IndianRupee,
   Receipt,
@@ -15,9 +15,11 @@ import {
   ClipboardList,
 } from "lucide-react";
 import type { Bill, LedgerData, MedicineWithBatches } from "@/lib/types";
-import { amount, expiryState, money, monthSlash, timeLabel, todayIso } from "@/lib/format";
+import { amount, dateSlash, expiryState, money, monthSlash, timeLabel, todayIso } from "@/lib/format";
 import { round2 } from "@/lib/calc";
+import { PERIOD_LABEL, inRange, periodRange, type Period } from "@/lib/period";
 import { Card, PageTitle, Pill, ValuePopup } from "./ui";
+import { PeriodFilter } from "./PeriodFilter";
 import { useMode } from "./mode-context";
 import type { ScreenKey } from "./Sidebar";
 
@@ -35,41 +37,64 @@ export const Dashboard = ({
   onNavigate: (screen: ScreenKey) => void;
 }) => {
   const mode = useMode();
+  const [filter, setFilter] = useState<{ period: Period; from: string; to: string }>({ period: "TODAY", from: "", to: "" });
+  const range = useMemo(() => periodRange(filter.period, filter.from, filter.to), [filter]);
+  const periodName =
+    filter.period === "CUSTOM"
+      ? `${filter.from ? dateSlash(filter.from) : "start"} – ${filter.to ? dateSlash(filter.to) : "today"}`
+      : PERIOD_LABEL[filter.period];
 
-  /* This month's figures for this mode, from the transactions themselves
-     (sale price and cost captured on each bill line, not today's catalogue). */
-  const month = useMemo(() => {
+  /** Bills in the selected period, newest first (by bill date, then time billed). */
+  const periodBills = useMemo(
+    () =>
+      bills
+        .filter((b) => inRange(b.bill_date, range))
+        .sort((a, b) => b.bill_date.localeCompare(a.bill_date) || b.created_at.localeCompare(a.created_at)),
+    [bills, range],
+  );
+
+  /* Figures for the selected period, from the transactions themselves
+     (sale price and cost captured on each bill line, not today's catalogue);
+     returns are taken off. Outstanding is always as of now. */
+  const period = useMemo(() => {
     const today = todayIso();
-    const start = `${today.slice(0, 7)}-01`;
     const batchCost = new Map<string, number>();
     let purchases = 0;
     for (const m of medicines)
       for (const b of m.batches) {
         batchCost.set(b.id, round2(b.purchase_rate / (b.pack_size || 1)));
-        if (!b.source_batch_id && b.purchase_date >= start) purchases += b.purchase_rate * b.qty_packs;
+        if (!b.source_batch_id && inRange(b.purchase_date, range)) purchases += b.purchase_rate * b.qty_packs;
       }
     let sales = 0;
     let cost = 0;
-    let count = 0;
+    let units = 0;
+    let discount = 0;
+    let returns = 0;
+    for (const bill of periodBills) {
+      discount += bill.discount;
+      returns += bill.returned_amount;
+      const lines = bill.items.reduce((s, i) => s + i.line_amount, 0);
+      const f = lines > 0 ? bill.grand_total / lines : 1;
+      for (const i of bill.items) {
+        const net = i.qty - i.returned_qty;
+        units += net;
+        sales += i.per_unit_price * net * f;
+        cost += (i.cost_per_unit || batchCost.get(i.batch_id) || 0) * net;
+      }
+    }
     let outstanding = 0;
     let overdue = 0;
     for (const bill of bills) {
       outstanding += bill.due_amount;
       if (bill.due_amount > 0 && bill.due_date && bill.due_date < today) overdue += bill.due_amount;
-      if (bill.bill_date < start) continue;
-      count += 1;
-      const lines = bill.items.reduce((s, i) => s + i.line_amount, 0);
-      const f = lines > 0 ? bill.grand_total / lines : 1;
-      for (const i of bill.items) {
-        const net = i.qty - i.returned_qty;
-        sales += i.per_unit_price * net * f;
-        cost += (i.cost_per_unit || batchCost.get(i.batch_id) || 0) * net;
-      }
     }
     const profit = round2(sales - cost);
     return {
       sales: round2(sales),
-      count,
+      count: periodBills.length,
+      units,
+      discount: round2(discount),
+      returns: round2(returns),
       profit,
       margin: sales > 0 ? (profit / sales) * 100 : 0,
       purchases: round2(purchases),
@@ -77,17 +102,9 @@ export const Dashboard = ({
       overdue: round2(overdue),
       pendingOrders: (ledger?.purchaseOrders ?? []).filter((o) => o.status === "ORDERED"),
     };
-  }, [medicines, bills, ledger]);
-  const stats = useMemo(() => {
-    const today = todayIso();
-    const todayBills = bills.filter((b) => b.bill_date === today);
-    const todayRevenue = round2(todayBills.reduce((sum, b) => sum + b.grand_total, 0));
-    const totalRevenue = round2(bills.reduce((sum, b) => sum + b.grand_total, 0));
-    const todayItems = todayBills.reduce(
-      (sum, b) => sum + b.items.reduce((s, i) => s + i.qty, 0),
-      0,
-    );
+  }, [medicines, bills, periodBills, range, ledger]);
 
+  const stats = useMemo(() => {
     let lowStock = 0;
     let expiring = 0;
     let expired = 0;
@@ -107,34 +124,33 @@ export const Dashboard = ({
     }
 
     return {
-      todayBills: todayBills.length,
-      todayRevenue,
-      totalRevenue,
-      todayItems,
       lowStock,
       expiring,
       expired,
       stockQty,
       stockValue: round2(stockValue),
     };
-  }, [medicines, bills]);
+  }, [medicines]);
 
+  /** Best sellers in the period by units sold (returns taken off), then by value. */
   const topMedicines = useMemo(() => {
     const tally = new Map<string, { name: string; qty: number; value: number }>();
-    for (const bill of bills) {
+    for (const bill of periodBills) {
       for (const item of bill.items) {
+        const net = item.qty - item.returned_qty;
+        if (net <= 0) continue;
         const current = tally.get(item.medicine_id) || {
           name: item.generic_name,
           qty: 0,
           value: 0,
         };
-        current.qty += item.qty;
-        current.value += item.line_amount;
+        current.qty += net;
+        current.value += item.per_unit_price * net;
         tally.set(item.medicine_id, current);
       }
     }
-    return [...tally.values()].sort((a, b) => b.qty - a.qty).slice(0, 5);
-  }, [bills]);
+    return [...tally.values()].sort((a, b) => b.qty - a.qty || b.value - a.value).slice(0, 5);
+  }, [periodBills]);
 
   const attention = useMemo(() => {
     const rows: { name: string; detail: string; tone: "red" | "amber" }[] = [];
@@ -166,24 +182,49 @@ export const Dashboard = ({
 
   return (
     <div>
-      <PageTitle title={mode === "wholesale" ? "Wholesale Overview" : "Retail Overview"} subtitle="Today at a glance" />
+      <PageTitle
+        title={mode === "wholesale" ? "Wholesale Overview" : "Retail Overview"}
+        subtitle={`Showing ${periodName}`}
+      />
 
-      {/* KPI cards */}
+      <div className="mb-4">
+        <PeriodFilter period={filter.period} from={filter.from} to={filter.to} onChange={setFilter} />
+      </div>
+
+      {/* Selected period — sales, bills, profit */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           icon={<IndianRupee className="h-5 w-5" />}
-          label="Today's Revenue"
-          value={money(stats.todayRevenue)}
-          sub={`${stats.todayItems} units sold today`}
+          label={`Revenue · ${periodName}`}
+          value={money(period.sales)}
+          sub={`${period.units} units sold${period.returns > 0 ? ` · ${money(period.returns)} returned` : ""}`}
           tone="green"
         />
         <KpiCard
           icon={<Receipt className="h-5 w-5" />}
-          label="Today's Bills"
-          value={String(stats.todayBills)}
-          sub={`${bills.length} bills all time`}
+          label={`Bills · ${periodName}`}
+          value={String(period.count)}
+          sub={`${money(period.discount)} discount given`}
           tone="blue"
         />
+        <KpiCard
+          icon={<TrendingUp className="h-5 w-5" />}
+          label={`Profit · ${periodName}`}
+          value={money(period.profit)}
+          sub={`${period.margin.toFixed(1)}% margin`}
+          tone="green"
+        />
+        <KpiCard
+          icon={<Truck className="h-5 w-5" />}
+          label={`Purchases · ${periodName}`}
+          value={money(period.purchases)}
+          sub="Stock received, at cost"
+          tone="gray"
+        />
+      </div>
+
+      {/* As of now — stock, receivables, orders */}
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <KpiCard
           icon={<Package className="h-5 w-5" />}
           label="Stock on Hand"
@@ -192,55 +233,30 @@ export const Dashboard = ({
           tone="gray"
         />
         <KpiCard
-          icon={<TrendingUp className="h-5 w-5" />}
-          label="Total Revenue"
-          value={money(stats.totalRevenue)}
-          sub={`${customerCount} registered customers`}
-          tone="green"
-        />
-      </div>
-
-      {/* This month — profit, receivables, purchases */}
-      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          icon={<TrendingUp className="h-5 w-5" />}
-          label="Profit This Month"
-          value={money(month.profit)}
-          sub={`${month.margin.toFixed(1)}% margin on ${money(month.sales)}`}
-          tone="green"
-        />
-        <KpiCard
           icon={<Wallet className="h-5 w-5" />}
           label={mode === "wholesale" ? "Receivables" : "Customer Outstanding"}
-          value={money(month.outstanding)}
-          sub={month.overdue > 0 ? `${money(month.overdue)} overdue` : "Nothing overdue"}
+          value={money(period.outstanding)}
+          sub={period.overdue > 0 ? `${money(period.overdue)} overdue` : "Nothing overdue"}
           tone="blue"
-        />
-        <KpiCard
-          icon={<Truck className="h-5 w-5" />}
-          label="Purchases This Month"
-          value={money(month.purchases)}
-          sub="Stock received, at cost"
-          tone="gray"
         />
         {mode === "wholesale" ? (
           <KpiCard
             icon={<ClipboardList className="h-5 w-5" />}
             label="Pending Purchase Orders"
-            value={String(month.pendingOrders.length)}
+            value={String(period.pendingOrders.length)}
             sub={
-              month.pendingOrders.length
-                ? `₹${amount(month.pendingOrders.reduce((s, o) => s + o.items.reduce((t, i) => t + i.packs * i.rate, 0), 0))} on order`
+              period.pendingOrders.length
+                ? `₹${amount(period.pendingOrders.reduce((s, o) => s + o.items.reduce((t, i) => t + i.packs * i.rate, 0), 0))} on order`
                 : "No open orders"
             }
             tone="blue"
           />
         ) : (
           <KpiCard
-            icon={<Receipt className="h-5 w-5" />}
-            label="Sales This Month"
-            value={money(month.sales)}
-            sub={`${month.count} bills`}
+            icon={<Users className="h-5 w-5" />}
+            label="Customers"
+            value={String(customerCount)}
+            sub="Registered customers"
             tone="blue"
           />
         )}
@@ -275,7 +291,12 @@ export const Dashboard = ({
         {/* Recent bills */}
         <Card className="lg:col-span-2">
           <div className="flex items-center justify-between border-b border-[#eef1f3] px-4 py-3.5">
-            <h3 className="text-[14px] font-bold text-gray-900">Recent Bills</h3>
+            <h3 className="text-[14px] font-bold text-gray-900">
+              Bills · {periodName}
+              {periodBills.length > 10 && (
+                <span className="ml-1.5 text-[12px] font-medium text-gray-500">(latest 10 of {periodBills.length})</span>
+              )}
+            </h3>
             <button
               onClick={() => onNavigate("reports")}
               className="flex cursor-pointer items-center gap-1 text-[12.5px] font-semibold text-[#1f6feb] hover:underline"
@@ -289,14 +310,14 @@ export const Dashboard = ({
                 <tr className="bg-[#fafbfc] text-gray-600">
                   <th className="th">Bill No</th>
                   <th className="th">Customer</th>
-                  <th className="th">Time</th>
+                  <th className="th">Date &amp; Time</th>
                   <th className="th text-center">Items</th>
                   <th className="th text-right">Discount</th>
                   <th className="th text-right">Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#f1f3f5]">
-                {bills.slice(0, 7).map((bill) => (
+                {periodBills.slice(0, 10).map((bill) => (
                   <tr key={bill.id}>
                     <td className="td font-semibold text-gray-900">{bill.id}</td>
                     <td className="td">
@@ -307,16 +328,18 @@ export const Dashboard = ({
                         </span>
                       )}
                     </td>
-                    <td className="td text-gray-500">{timeLabel(bill.created_at)}</td>
+                    <td className="td whitespace-nowrap text-gray-500">
+                      {dateSlash(bill.bill_date)} · {timeLabel(bill.created_at)}
+                    </td>
                     <td className="td text-center">{bill.items.length}</td>
                     <td className="td text-right text-[var(--c-deep)]">{amount(bill.discount)}</td>
                     <td className="td text-right font-bold">{money(bill.grand_total)}</td>
                   </tr>
                 ))}
-                {!bills.length && (
+                {!periodBills.length && (
                   <tr>
                     <td colSpan={6} className="px-4 py-12 text-center text-[13px] text-gray-400">
-                      No bills yet — start from the Billing (POS) screen.
+                      {bills.length ? `No bills in ${periodName}.` : "No bills yet — start from the Billing (POS) screen."}
                     </td>
                   </tr>
                 )}
@@ -359,7 +382,7 @@ export const Dashboard = ({
       <Card className="mt-4">
         <div className="flex items-center gap-2 border-b border-[#eef1f3] px-4 py-3.5">
           <Users className="h-[18px] w-[18px] text-gray-500" />
-          <h3 className="text-[14px] font-bold text-gray-900">Top Selling Medicines</h3>
+          <h3 className="text-[14px] font-bold text-gray-900">Top Selling Medicines · {periodName}</h3>
         </div>
         <div className="divide-y divide-[#f1f3f5]">
           {topMedicines.map((row, index) => (

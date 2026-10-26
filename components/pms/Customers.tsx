@@ -90,10 +90,10 @@ export const Customers = ({
   return (
     <div>
       <PageTitle
-        title={wholesale ? "Customers & Distributors" : "Customers"}
+        title={wholesale ? "Distributors" : "Customers"}
         subtitle={
           wholesale
-            ? "Retailers, medical shops, clinics, hospitals and distributors — terms, credit and balances"
+            ? "Pharmacies and distributors you sell to — licence, GSTIN, credit terms and balances"
             : "Name, phone and purchase history"
         }
         right={
@@ -103,7 +103,7 @@ export const Customers = ({
             </Button>
             {role === "admin" && (
               <Button variant="blue" onClick={() => setAdding(true)}>
-                <Plus className="h-4 w-4" /> Add Customer
+                <Plus className="h-4 w-4" /> {wholesale ? "Add Distributor" : "Add Customer"}
               </Button>
             )}
           </>
@@ -115,7 +115,7 @@ export const Customers = ({
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by customer ID, name or phone"
+          placeholder={wholesale ? "Search by distributor ID, name, phone or GSTIN" : "Search by customer ID, name or phone"}
           className="h-11 w-full rounded-lg border border-[#e2e6ea] bg-white pl-10 pr-3 text-[13.5px] outline-none transition placeholder:text-gray-400 focus:border-[var(--c-primary)]"
         />
       </div>
@@ -127,12 +127,12 @@ export const Customers = ({
             <thead>
               <tr className="bg-[#f4f6f8] text-gray-700">
                 <th className="th">S.No</th>
-                <th className="th">Customer ID</th>
+                <th className="th">{wholesale ? "Distributor ID" : "Customer ID"}</th>
                 <th className="th">{wholesale ? "Pharmacy Name" : "Name"}</th>
                 <th className="th">Phone</th>
                 <th className="th">Address</th>
                 <th className="th">{wholesale ? "Type" : "Doctor"}</th>
-                <th className="th">{wholesale ? "GSTIN" : "Email"}</th>
+                <th className="th">{wholesale ? "GSTIN / DL No" : "Email"}</th>
                 <th className="th">{wholesale ? "Terms" : "Age / Gender"}</th>
                 <th className="th text-center">Bills</th>
                 <th className="th text-right">Total Purchase</th>
@@ -153,11 +153,23 @@ export const Customers = ({
                         <Pill tone="green">QUICK BILL</Pill>
                       </span>
                     )}
+                    {wholesale && customer.contact_person && (
+                      <span className="block text-[11.5px] font-normal text-gray-500">Contact: {customer.contact_person}</span>
+                    )}
                   </td>
                   <td className="td">{customer.phone || "—"}</td>
                   <td className="td max-w-[220px] truncate">{customer.address || "—"}</td>
                   <td className="td">{(wholesale ? customer.business_type : customer.doctor_name) || "—"}</td>
-                  <td className="td max-w-[180px] truncate">{(wholesale ? customer.gstin : customer.email) || "—"}</td>
+                  <td className="td max-w-[200px]">
+                    {wholesale ? (
+                      <>
+                        <span className="block truncate">{customer.gstin || "—"}</span>
+                        {customer.dl_no && <span className="block truncate text-[11.5px] text-gray-500">DL {customer.dl_no}</span>}
+                      </>
+                    ) : (
+                      <span className="block truncate">{customer.email || "—"}</span>
+                    )}
+                  </td>
                   <td className="td">
                     {wholesale
                       ? [
@@ -448,6 +460,8 @@ const CustomerFormModal = ({
     credit_limit: customer?.credit_limit ? String(customer.credit_limit) : "",
     credit_days: customer?.credit_days ? String(customer.credit_days) : "",
     discount_percent: customer?.discount_percent ? String(customer.discount_percent) : "",
+    contact_person: customer?.contact_person || "",
+    dl_no: customer?.dl_no || "",
     name: customer?.name || "",
     phone: customer?.phone || "",
     address: customer?.address || "",
@@ -537,6 +551,20 @@ const CustomerFormModal = ({
                 value={draft.gstin}
                 onChange={(e) => setDraft({ ...draft, gstin: e.target.value.toUpperCase().slice(0, 15) })}
                 placeholder="15-character GSTIN"
+              />
+            </Field>
+            <Field label="Drug Licence No.">
+              <TextInput
+                value={draft.dl_no}
+                onChange={(e) => setDraft({ ...draft, dl_no: e.target.value.toUpperCase() })}
+                placeholder="e.g. TN-01-20B-12345"
+              />
+            </Field>
+            <Field label="Contact Person">
+              <TextInput
+                value={draft.contact_person}
+                onChange={(e) => setDraft({ ...draft, contact_person: e.target.value })}
+                placeholder="Owner / pharmacist name"
               />
             </Field>
             <Field label="Customer Discount %" hint="Taken off the wholesale price on every bill">

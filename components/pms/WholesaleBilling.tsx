@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import type { Batch, Bill, CartLine, Customer, DiscountTier, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
 import { calcBillOffer, calcBillTotals, round2 } from "@/lib/calc";
+import { calcTypeDiscounts } from "@/lib/type-discounts";
 import { amount, money, monthShort, stockBreakdown, todayIso, unitNoun, type SellBy } from "@/lib/format";
 import { listHeldBills, saveHeldBills } from "@/lib/store";
 import { addPharmacyAtBilling, submitBill } from "@/lib/actions";
@@ -285,8 +286,14 @@ export const WholesaleBilling = ({
     [lines, customerDiscount, tiers],
   );
   const totals = useMemo(() => calcBillTotals(priced), [priced]);
-  const billOffer = calcBillOffer(ms?.bill_offers ?? [], totals.grandTotal);
-  const payable = round2(totals.grandTotal - billOffer.discount);
+  // Same order as the server: product-type discounts, then the bill offer.
+  const typeDiscount = calcTypeDiscounts(
+    ms?.type_discounts ?? [],
+    priced.map((l) => ({ product_type: l.product_type, amount: round2(l.per_unit_price * l.qty) })),
+  );
+  const afterType = round2(totals.grandTotal - typeDiscount.total);
+  const billOffer = calcBillOffer(ms?.bill_offers ?? [], afterType);
+  const payable = round2(afterType - billOffer.discount);
   const receivedNum = Number(received) || 0;
   const isCredit = payment === "Credit";
   const dueNow = isCredit ? round2(Math.max(0, payable - receivedNum)) : 0;
@@ -681,11 +688,12 @@ export const WholesaleBilling = ({
                   return (
                     <tr key={line.key} className="align-middle">
                       <td className="px-1.5 py-3 text-[12px] text-gray-500">{index + 1}</td>
-                      <td className="px-1.5 py-3 text-[11.5px] font-medium text-gray-700">{line.product_type || "—"}</td>
+                      <td className="px-1.5 py-3 text-[11.5px] font-medium text-gray-700">{line.product_type || line.purchase_unit_type || "—"}</td>
                       <td className="px-1.5 py-3">
                         <p className="text-[12.5px] font-semibold leading-tight text-gray-900">{line.generic_name}</p>
                         <p className="text-[11px] text-gray-500">
-                          {line.batch_no} · {line.qty} units · ₹{amount(perUnit * line.pack_size)}/pack
+                          {line.brand_name} · {line.batch_no} · {stockBreakdown({ ...line, strips_per_box: 0, stock_qty: line.qty })} ·
+                          ₹{amount(perUnit * line.pack_size)}/pack
                         </p>
                       </td>
                       <td className="px-1.5 py-3">
@@ -900,6 +908,9 @@ export const WholesaleBilling = ({
           <div className="mt-4 space-y-2.5 text-[13px]">
             <Row label={`Sub Total (MRP, ${totals.itemCount} items)`} value={money(totals.subTotal)} />
             <Row label="Discount" value={money(totals.discount)} green />
+            {typeDiscount.parts.map((p) => (
+              <Row key={p.type} label={`${p.type} discount (${p.percent}% on ${money(p.subtotal)})`} value={`− ${money(p.discount)}`} green />
+            ))}
             {billOffer.offer && (
               <Row
                 label={`Bill offer (${billOffer.offer.percent}% on ₹${amount(billOffer.offer.min_amount)}+)`}

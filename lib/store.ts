@@ -22,7 +22,7 @@ import {
   Supplier,
 } from "./types";
 import { calcBillTotals, calcIncludedGst, round2 } from "./calc";
-import { DEFAULT_PRODUCT_TYPES } from "./product-types";
+import { DEFAULT_PRODUCT_TYPES, DEFAULT_PURCHASE_UNITS } from "./product-types";
 
 const STORAGE_KEY = "nalam_care_medicals_pms_v2";
 /** Browser keys left by the previous app on this device — removed on first load. */
@@ -55,6 +55,8 @@ const CUSTOMER_EXTRAS = {
   credit_limit: 0,
   credit_days: 0,
   discount_percent: 0,
+  contact_person: "",
+  dl_no: "",
 } as const;
 
 /* -------------------------------------------------------------------------
@@ -80,6 +82,7 @@ export const DEFAULT_SETTINGS: ShopSettings = {
   low_stock_threshold: 20,
   expiry_alert_months: 6,
   product_types: DEFAULT_PRODUCT_TYPES,
+  purchase_units: DEFAULT_PURCHASE_UNITS,
 };
 
 type SeedRow = {

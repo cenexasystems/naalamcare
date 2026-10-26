@@ -29,13 +29,12 @@ import { useReconciliation } from "./data";
 import { INVENTORY_SHEET } from "./exports";
 import { downloadCsv, downloadExcel } from "@/lib/xlsx";
 import { useSettings } from "./data";
-import { DEFAULT_PRODUCT_TYPES, productTypeOptions } from "@/lib/product-types";
+import { DEFAULT_PRODUCT_TYPES, DEFAULT_PURCHASE_UNITS, productTypeOptions } from "@/lib/product-types";
 import { playAlarmBeep } from "@/lib/alarm";
 import { Button, Card, Field, Modal, PageTitle, Pill, Select, StatTile, TextInput } from "./ui";
 
 const PAGE_SIZE = 8;
 const SCHEDULES: DrugSchedule[] = ["H", "H1", "X", "NRX", "OTC", "General"];
-const PURCHASE_UNITS: PurchaseUnitType[] = ["Strip", "Piece", "Bottle"];
 
 export const Inventory = ({
   medicines,
@@ -720,6 +719,7 @@ const EditBatchModal = ({
   // Keyed by batch id at the call site, so a fresh draft comes from mounting.
   const [draft, setDraft] = useState<Batch | null>(batch);
   const mode = useMode();
+  const { data: settings } = useSettings();
   if (!draft) return null;
 
   const set = (patch: Partial<Batch>) => setDraft({ ...draft, ...patch });
@@ -775,7 +775,7 @@ const EditBatchModal = ({
             value={draft.purchase_unit_type}
             onChange={(e) => set({ purchase_unit_type: e.target.value as PurchaseUnitType })}
           >
-            {PURCHASE_UNITS.map((u) => (
+            {productTypeOptions(settings?.purchase_units ?? DEFAULT_PURCHASE_UNITS, draft.purchase_unit_type).map((u) => (
               <option key={u} value={u}>
                 {u}
               </option>
@@ -921,7 +921,7 @@ const EditMedicineModal = ({
             value={draft.purchase_unit_type}
             onChange={(e) => set({ purchase_unit_type: e.target.value as PurchaseUnitType })}
           >
-            {PURCHASE_UNITS.map((u) => (
+            {productTypeOptions(settings?.purchase_units ?? DEFAULT_PURCHASE_UNITS, draft.purchase_unit_type).map((u) => (
               <option key={u} value={u}>
                 {u}
               </option>

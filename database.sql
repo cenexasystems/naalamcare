@@ -482,3 +482,22 @@ ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "invoice_promo" text DEFAUL
 ALTER TABLE "medicines" ADD COLUMN IF NOT EXISTS "product_type" text DEFAULT '' NOT NULL;
 ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "product_type" text DEFAULT '' NOT NULL;
 ALTER TABLE "settings" ADD COLUMN IF NOT EXISTS "product_types" text DEFAULT '' NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 14. Automatic product-type discounts (JSON bands per product type)
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "type_discounts" text DEFAULT '[]' NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 15. Purchase units list (Strip, Piece, Bottle + the shop's own)
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "settings" ADD COLUMN IF NOT EXISTS "purchase_units" text DEFAULT '' NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 16. Distributor details on wholesale customers
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "customers" ADD COLUMN IF NOT EXISTS "contact_person" text DEFAULT '' NOT NULL;
+ALTER TABLE "customers" ADD COLUMN IF NOT EXISTS "dl_no" text DEFAULT '' NOT NULL;

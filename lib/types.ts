@@ -5,6 +5,7 @@
 
 import type { Mode } from "./mode";
 import type { InvoicePromo } from "./promo";
+import type { TypeDiscountRule } from "./type-discounts";
 export type { Mode } from "./mode";
 
 /** Server actions return this instead of throwing, so messages survive production builds. */
@@ -14,7 +15,8 @@ export type ActionResult<T = null> = { ok: true; data: T } | { ok: false; error:
 export type DrugSchedule = "H" | "H1" | "X" | "NRX" | "OTC" | "General";
 
 /** How the medicine is purchased from the supplier */
-export type PurchaseUnitType = "Strip" | "Piece" | "Bottle";
+/** "Strip", "Piece", "Bottle" or any unit added in Settings → Purchase Units */
+export type PurchaseUnitType = string;
 
 /** Cash / UPI / Card at the counter; wholesale adds Bank Transfer, Cheque and Credit. */
 export type PaymentMethod = "Cash" | "UPI" | "Card" | "Bank Transfer" | "Cheque" | "Credit";
@@ -143,6 +145,9 @@ export type Customer = {
   credit_days: number;
   /** Customer-specific discount % off the selling price */
   discount_percent: number;
+  /** Wholesale: contact person and drug licence number of the pharmacy / distributor */
+  contact_person: string;
+  dl_no: string;
   created_at: string;
 };
 
@@ -287,6 +292,8 @@ export type ShopSettings = {
   expiry_alert_months: number;
   /** Product types offered for medicines (Settings → Product Types) */
   product_types: string[];
+  /** Purchase units offered for batches (Settings → Purchase Units) */
+  purchase_units: string[];
 };
 
 export type Store = {
@@ -331,6 +338,8 @@ export type ModeSettings = {
   invoice_terms: string;
   /** Offer pop-up shown on the customer invoice link */
   invoice_promo: InvoicePromo;
+  /** Automatic % off by product type, banded by that type's total on the bill */
+  type_discounts: TypeDiscountRule[];
   /** This mode's GSTIN and drug licence number, printed on its invoices */
   gstin: string;
   dl_no: string;

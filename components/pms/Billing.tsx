@@ -17,15 +17,17 @@ import {
   PackageOpen,
   Info,
 } from "lucide-react";
-import type { Batch, CartLine, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
+import type { Batch, Bill, CartLine, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
 import { calcBillOffer, calcBillTotals, calcDiscountPercent, round2 } from "@/lib/calc";
+import { calcTypeDiscounts } from "@/lib/type-discounts";
 import { amount, money, monthShort, sellByOptions, stockBreakdown, unitNoun, todayIso, type SellBy } from "@/lib/format";
 import { listHeldBills, saveHeldBills } from "@/lib/store";
 import { submitBill } from "@/lib/actions";
 import { Button, Card, Pill, ScheduleBadge, ScreenHeading, Select } from "./ui";
 import { CustomerModal, type CustomerPayload } from "./CustomerModal";
 import { act, useMode } from "./mode-context";
-import { useSettings } from "./data";
+import { mutateAll, useBills, useSettings } from "./data";
+import { ReturnModal } from "./Payments";
 
 /** Quick-add quantities requested by the client (slide 3) */
 const QUICK_ADD = [1, 10, 15, 20, 30, 45];
@@ -81,11 +83,17 @@ export const Billing = ({
   const [received, setReceived] = useState<string>("");
   const [payment, setPayment] = useState<PaymentMethod>("Cash");
   const [txnRef, setTxnRef] = useState("");
-  const [extraDiscount, setExtraDiscount] = useState<number>(0);
+  /** Counter discount on top of the automatic ones — a ₹ amount or a % of the bill */
+  const [extra, setExtra] = useState<{ kind: "amount" | "percent"; value: number }>({ kind: "amount", value: 0 });
   const [showDiscountBox, setShowDiscountBox] = useState(false);
   const [discountDraft, setDiscountDraft] = useState("");
+  const [discountKind, setDiscountKind] = useState<"amount" | "percent">("amount");
   const [billDate, setBillDate] = useState(todayIso());
   const [showMore, setShowMore] = useState(false);
+  /** Returned goods: find the original bill by number, then the return screen opens */
+  const [returnBillNo, setReturnBillNo] = useState("");
+  const [returning, setReturning] = useState<Bill | null>(null);
+  const { data: allBills } = useBills();
   const [customerOpen, setCustomerOpen] = useState(false);
   const [notice, setNotice] = useState("");
 
@@ -230,17 +238,38 @@ export const Billing = ({
     setLines([]);
     setReceived("");
     setTxnRef("");
-    setExtraDiscount(0);
+    setExtra({ kind: "amount", value: 0 });
     clientRef.current = newClientRef();
     clearSelection();
   };
 
   /* ------------------------------- totals -------------------------------- */
   const totals = useMemo(() => calcBillTotals(lines), [lines]);
-  const billOffer = calcBillOffer(settings?.mode_settings.bill_offers ?? [], totals.grandTotal);
-  const payable = round2(Math.max(0, totals.grandTotal - billOffer.discount - extraDiscount));
+  // Same order as the server: product-type discounts, then the bill offer, then the counter discount.
+  const typeDiscount = calcTypeDiscounts(
+    settings?.mode_settings.type_discounts ?? [],
+    lines.map((l) => ({ product_type: l.product_type, amount: round2(l.per_unit_price * l.qty) })),
+  );
+  const afterType = round2(totals.grandTotal - typeDiscount.total);
+  const billOffer = calcBillOffer(settings?.mode_settings.bill_offers ?? [], afterType);
+  const afterOffer = round2(afterType - billOffer.discount);
+  const extraDiscount = Math.min(
+    afterOffer,
+    extra.kind === "percent" ? round2((afterOffer * Math.min(100, extra.value)) / 100) : extra.value,
+  );
+  const payable = round2(Math.max(0, afterOffer - extraDiscount));
   const receivedNum = Number(received) || 0;
   const change = round2(Math.max(0, receivedNum - payable));
+
+  const openReturn = () => {
+    const no = returnBillNo.trim().toUpperCase();
+    if (!no) return setNotice("Enter the bill number to return items from.");
+    const bill = (allBills ?? []).find((b) => b.id.toUpperCase() === no);
+    if (!bill) return setNotice(`Bill ${no} was not found in this dashboard.`);
+    if (!bill.items.some((i) => i.qty - i.returned_qty > 0)) return setNotice(`Everything on bill ${bill.id} has already been returned.`);
+    setShowMore(false);
+    setReturning(bill);
+  };
 
   /* -------------------------------- hold --------------------------------- */
   const holdBill = () => {
@@ -706,13 +735,16 @@ export const Billing = ({
                 {lines.map((line, index) => (
                   <tr key={line.key} className="align-middle">
                     <td className="px-1.5 py-3 text-[12px] text-gray-500">{index + 1}</td>
-                    <td className="px-1.5 py-3 text-[11.5px] font-medium text-gray-700">{line.product_type || "—"}</td>
+                    <td className="px-1.5 py-3 text-[11.5px] font-medium text-gray-700">{line.product_type || line.purchase_unit_type || "—"}</td>
                     <td className="px-1.5 py-3">
                       <p className="text-[12.5px] font-semibold leading-tight text-gray-900">
                         {line.generic_name}
                       </p>
                       <p className="text-[11px] text-gray-500">
-                        {line.brand_name} · {unitNoun(line.purchase_unit_type, line.pack_size)}
+                        {line.brand_name} · {line.qty} {unitNoun(line.purchase_unit_type, line.qty)}
+                        {line.pack_size > 1 && line.qty >= line.pack_size
+                          ? ` (${stockBreakdown({ ...line, strips_per_box: 0, stock_qty: line.qty })})`
+                          : ""}
                       </p>
                     </td>
                     <td className="px-1.5 py-3 text-center">
@@ -766,7 +798,8 @@ export const Billing = ({
             <div className="relative">
               <button
                 onClick={() => {
-                  setDiscountDraft(extraDiscount ? String(extraDiscount) : "");
+                  setDiscountDraft(extra.value ? String(extra.value) : "");
+                  setDiscountKind(extra.value ? extra.kind : "amount");
                   setShowDiscountBox((v) => !v);
                 }}
                 className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-[#e3e7ea] py-2.5 text-[13px] font-semibold text-gray-700 transition hover:bg-gray-50"
@@ -779,23 +812,49 @@ export const Billing = ({
                     <Info className="mt-[1px] h-3.5 w-3.5 shrink-0 text-[#1f6feb]" />
                     MRP-to-selling discount of {money(totals.discount)} is already applied
                     automatically
+                    {typeDiscount.total > 0 ? `, plus ${money(typeDiscount.total)} product-type discount` : ""}
                     {billOffer.offer ? `, plus the ${billOffer.offer.percent}% bill offer (${money(billOffer.discount)})` : ""}.
                     Add an extra discount below if needed.
                   </p>
-                  <input
-                    type="number"
-                    autoFocus
-                    value={discountDraft}
-                    onChange={(e) => setDiscountDraft(e.target.value)}
-                    placeholder="Extra discount ₹"
-                    className="field"
-                  />
+                  <div className="flex gap-2">
+                    <div className="flex shrink-0 overflow-hidden rounded-lg border border-[#d8dde3] text-[13px] font-bold">
+                      {(["amount", "percent"] as const).map((k) => (
+                        <button
+                          key={k}
+                          onClick={() => setDiscountKind(k)}
+                          className={`w-10 cursor-pointer transition ${
+                            discountKind === k ? "bg-[var(--c-deep)] text-white" : "bg-white text-gray-700 hover:bg-gray-50"
+                          }`}
+                        >
+                          {k === "amount" ? "₹" : "%"}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="number"
+                      autoFocus
+                      value={discountDraft}
+                      onChange={(e) => setDiscountDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return;
+                        setExtra({ kind: discountKind, value: Math.max(0, Number(discountDraft) || 0) });
+                        setShowDiscountBox(false);
+                      }}
+                      placeholder={discountKind === "amount" ? "Extra discount ₹" : "Extra discount %"}
+                      className="field"
+                    />
+                  </div>
+                  {discountKind === "percent" && Number(discountDraft) > 0 && (
+                    <p className="mt-1.5 text-[11.5px] font-semibold text-[var(--c-deep)]">
+                      = {money(round2((afterOffer * Math.min(100, Number(discountDraft))) / 100))} off {money(afterOffer)}
+                    </p>
+                  )}
                   <div className="mt-2.5 flex gap-2">
                     <Button
                       variant="ghost"
                       className="flex-1 py-2 text-[12.5px]"
                       onClick={() => {
-                        setExtraDiscount(0);
+                        setExtra({ kind: "amount", value: 0 });
                         setShowDiscountBox(false);
                       }}
                     >
@@ -804,7 +863,7 @@ export const Billing = ({
                     <Button
                       className="flex-1 py-2 text-[12.5px]"
                       onClick={() => {
-                        setExtraDiscount(Math.max(0, Number(discountDraft) || 0));
+                        setExtra({ kind: discountKind, value: Math.max(0, Number(discountDraft) || 0) });
                         setShowDiscountBox(false);
                       }}
                     >
@@ -828,14 +887,29 @@ export const Billing = ({
           <div className="space-y-2.5 text-[13px]">
             <Row label={`Sub Total (${totals.itemCount} Items)`} value={money(totals.subTotal)} />
             <Row
-              label="Discount"
-              value={money(round2(totals.discount + extraDiscount))}
-              tone={totals.discount + extraDiscount > 0 ? "green" : undefined}
+              label="Discount (MRP to selling)"
+              value={money(totals.discount)}
+              tone={totals.discount > 0 ? "green" : undefined}
             />
+            {typeDiscount.parts.map((p) => (
+              <Row
+                key={p.type}
+                label={`${p.type} discount (${p.percent}% on ${money(p.subtotal)})`}
+                value={`− ${money(p.discount)}`}
+                tone="green"
+              />
+            ))}
             {billOffer.offer && (
               <Row
                 label={`Bill offer (${billOffer.offer.percent}% on ₹${amount(billOffer.offer.min_amount)}+)`}
                 value={`− ${money(billOffer.discount)}`}
+                tone="green"
+              />
+            )}
+            {extraDiscount > 0 && (
+              <Row
+                label={extra.kind === "percent" ? `Extra discount (${extra.value}%)` : "Extra discount"}
+                value={`− ${money(extraDiscount)}`}
                 tone="green"
               />
             )}
@@ -937,6 +1011,21 @@ export const Billing = ({
                   className="field mb-3"
                 />
                 <p className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide text-gray-500">
+                  Return items from a bill
+                </p>
+                <div className="mb-3 flex gap-2">
+                  <input
+                    value={returnBillNo}
+                    onChange={(e) => setReturnBillNo(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && openReturn()}
+                    placeholder="Bill no, e.g. 12"
+                    className="field"
+                  />
+                  <Button className="shrink-0 px-3 py-2 text-[12.5px]" onClick={openReturn}>
+                    Return
+                  </Button>
+                </div>
+                <p className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide text-gray-500">
                   Held bills ({held.length})
                 </p>
                 {held.length ? (
@@ -979,6 +1068,19 @@ export const Billing = ({
           </p>
         </Card>
       </section>
+
+      <ReturnModal
+        key={returning?.id || "no-return"}
+        bill={returning}
+        role="staff"
+        onClose={() => setReturning(null)}
+        onDone={(message) => {
+          setReturning(null);
+          setReturnBillNo("");
+          mutateAll();
+          setNotice(message);
+        }}
+      />
 
       <CustomerModal
         key={customerOpen ? "open" : "closed"}

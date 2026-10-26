@@ -11,7 +11,7 @@ import {
 import { THEMES, THEME_KEYS, resolveTheme } from "@/lib/format";
 import { deleteSupplier, saveSettings, saveSupplier } from "@/lib/actions";
 import { act, useMode, useModeState } from "./mode-context";
-import { InvoicePromoCard, LoginPasscodesCard, ProductTypesCard, ModeSettingsCard, ReconciliationCard, UsersCard } from "./SettingsExtras";
+import { InvoicePromoCard, LoginPasscodesCard, ProductTypesCard, PurchaseUnitsCard, TypeDiscountsCard, ModeSettingsCard, ReconciliationCard, UsersCard } from "./SettingsExtras";
 import { downloadBlob } from "@/lib/xlsx";
 import { Button, Card, Field, Modal, PageTitle, TextInput } from "./ui";
 
@@ -384,6 +384,17 @@ export const SettingsPanel = ({
       )}
 
       {isAdmin && initialSettings && <ProductTypesCard types={initialSettings.product_types} onChanged={onChanged} />}
+
+      {isAdmin && initialSettings && <PurchaseUnitsCard units={initialSettings.purchase_units} onChanged={onChanged} />}
+
+      {isAdmin && initialSettings && (
+        <TypeDiscountsCard
+          key={`type-discounts-${mode}`}
+          settings={initialSettings.mode_settings}
+          productTypes={initialSettings.product_types}
+          onChanged={onChanged}
+        />
+      )}
 
       {isAdmin && initialSettings && (
         <InvoicePromoCard
