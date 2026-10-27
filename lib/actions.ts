@@ -902,7 +902,7 @@ export async function saveModeSettings(mode: Mode, payload: any): Promise<Action
       .map((o: any) => ({ min_amount: round2(num(o.min_amount)), percent: round2(num(o.percent)) }))
       .filter((o: { min_amount: number; percent: number }) => o.min_amount > 0 || o.percent > 0);
     for (const o of offers as { min_amount: number; percent: number }[]) {
-      if (o.min_amount <= 0) fail("Each bill offer needs a minimum bill amount above ₹0.");
+      if (o.min_amount < 0) fail("A bill offer's minimum amount can't be negative (use ₹0 for every bill).");
       if (o.percent <= 0 || o.percent >= 100) fail("Each bill offer's discount must be between 0% and 100%.");
     }
     if (new Set(offers.map((o: { min_amount: number }) => o.min_amount)).size !== offers.length)

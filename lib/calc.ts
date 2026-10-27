@@ -105,7 +105,8 @@ export const calcBillOffer = (
   let offer: AppliedOffer["offer"] = null;
   let next: AppliedOffer["next"] = null;
   for (const o of offers) {
-    if (o.min_amount <= 0 || o.percent <= 0) continue;
+    // min_amount 0 = every bill ("below ₹699 → 10%" is the ₹0 row)
+    if (o.min_amount < 0 || o.percent <= 0) continue;
     if (amount >= o.min_amount) {
       if (!offer || o.percent > offer.percent) offer = o;
     } else if (!next || o.min_amount < next.min_amount) {

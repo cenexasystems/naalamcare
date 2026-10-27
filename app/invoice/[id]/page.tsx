@@ -33,10 +33,19 @@ const mfrLabel = (item: BillItem): string => {
   return maker.replace(/[^A-Za-z ]/g, "").trim().slice(0, 10);
 };
 
-const discPercent = (item: BillItem): number =>
-  item.line_mrp > 0 ? (item.line_discount / item.line_mrp) * 100 : 0;
+/** Share of the selling-price total actually charged after bill-level discounts (offers, counter discount). */
+const chargedFactor = (bill: Bill): number => {
+  const lines = linesTotal(bill);
+  return lines > 0 ? bill.grand_total / lines : 1;
+};
 
-const GENDER: Record<string, string> = { M: "Male", F: "Female", O: "Other" };
+/** What this line actually cost the customer, after every discount. */
+const netLineAmount = (bill: Bill, item: BillItem): number => (Number(item.line_amount) || 0) * chargedFactor(bill);
+
+/** Total discount on the line as a % of its MRP: MRP-to-selling plus the bill's offers / counter discount. */
+const discPercent = (bill: Bill, item: BillItem): number =>
+  item.line_mrp > 0 ? Math.max(0, ((item.line_mrp - netLineAmount(bill, item)) / item.line_mrp) * 100) : 0;
+
 
 /** Selling-price total of the lines, before any counter discount. */
 const linesTotal = (bill: Bill): number =>
@@ -187,9 +196,6 @@ export default async function InvoicePage({
             <p className="mt-3">Mob : {bill.customer_phone || ""}</p>
             <p>Cust. ID : {bill.customer_id || ""}</p>
             <p>Address : {bill.customer_address}</p>
-            <p>
-              Age / Gender : {[bill.customer_age, GENDER[bill.customer_gender] || bill.customer_gender].filter(Boolean).join(" / ")}
-            </p>
           </div>
 
           <div className="flex-1 text-center">
@@ -229,7 +235,7 @@ export default async function InvoicePage({
         <table className="h-full w-full flex-1 border-collapse text-[9.5px] leading-[1.3]">
           <thead>
             <tr className="bg-[#d9d9d9]">
-              {["No", "Type", "Product Name", "Pack", "Mfr", "Batch", "Exp", "MRP", "Qty", "Rate", "Disc", "GST%", "Amount", "HSN"].map((h) => (
+              {["No", "Type", "Product Name", "Pack", "Mfr", "Batch", "Exp", "MRP", "Qty", "Rate", "Disc %", "GST%", "Amount", "HSN"].map((h) => (
                 <th key={h} className="border border-black px-1 py-1 text-center font-bold">{h}</th>
               ))}
             </tr>
@@ -251,9 +257,9 @@ export default async function InvoicePage({
                 <td className="border border-black px-1 py-0.5 text-right">{amount(item.mrp_per_unit)}</td>
                 <td className="border border-black px-1 py-0.5 text-right">{item.qty}</td>
                 <td className="border border-black px-1 py-0.5 text-right">{amount(item.per_unit_price)}</td>
-                <td className="border border-black px-1 py-0.5 text-center">{amount(discPercent(item))}</td>
+                <td className="border border-black px-1 py-0.5 text-center">{discPercent(bill, item).toFixed(2)}%</td>
                 <td className="border border-black px-1 py-0.5 text-center">{amount(item.gst_percent)}</td>
-                <td className="border border-black px-1 py-0.5 text-right font-bold">{amount(item.line_amount)}</td>
+                <td className="border border-black px-1 py-0.5 text-right font-bold">{amount(netLineAmount(bill, item))}</td>
                 <td className="border border-black px-1 py-0.5 text-center">{item.hsn_code}</td>
               </tr>
             ))}
@@ -319,12 +325,14 @@ export default async function InvoicePage({
             <table className="w-full border-collapse">
               <tbody>
                 <tr>
-                  <td className="border border-black px-1 py-0.5">Sub Total</td>
-                  <td className="w-[70px] border border-black px-1 py-0.5 text-right">{amount(linesTotal(bill))}</td>
+                  <td className="border border-black px-1 py-0.5">Sub Total (MRP)</td>
+                  <td className="w-[70px] border border-black px-1 py-0.5 text-right">{amount(bill.sub_total)}</td>
                 </tr>
                 <tr>
-                  <td className="border border-black px-1 py-0.5">Discount</td>
-                  <td className="border border-black px-1 py-0.5 text-right">{amount(Math.max(0, linesTotal(bill) - bill.grand_total))}</td>
+                  <td className="border border-black px-1 py-0.5">
+                    Discount{bill.sub_total > 0 && savedAmount > 0 ? ` (${((savedAmount / bill.sub_total) * 100).toFixed(2)}%)` : ""}
+                  </td>
+                  <td className="border border-black px-1 py-0.5 text-right">{amount(Math.max(0, bill.sub_total - bill.grand_total))}</td>
                 </tr>
                 <tr>
                   <td className="border border-black px-1 py-0.5">Tax Amount</td>
@@ -342,7 +350,7 @@ export default async function InvoicePage({
                   <td className="border border-black px-1 py-0.5">Change Returned</td>
                   <td className="border border-black px-1 py-0.5 text-right">{amount(Math.max(0, bill.change_amount))}</td>
                 </tr>
-                {savedAmount > 0 && (
+                {!wholesale && savedAmount > 0 && (
                   <tr>
                     <td className="border border-black px-1 py-0.5 font-bold">You Saved (vs MRP)</td>
                     <td className="border border-black px-1 py-0.5 text-right font-bold">{amount(savedAmount)}</td>
@@ -424,7 +432,7 @@ export default async function InvoicePage({
           </div>
         </div>
 
-        {savedAmount > 0 && (
+        {!wholesale && savedAmount > 0 && (
           <p className="inv-break mt-1 rounded border border-black px-2 py-1 text-center text-[11px] font-bold">
             You saved {money(savedAmount)} on this bill (MRP {money(bill.sub_total)} − you paid {money(bill.grand_total)})
           </p>

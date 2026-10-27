@@ -16,6 +16,7 @@ import {
   CreditCard,
   PackageOpen,
   Info,
+  Undo2,
 } from "lucide-react";
 import type { Batch, Bill, CartLine, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
 import { calcBillOffer, calcBillTotals, calcDiscountPercent, round2 } from "@/lib/calc";
@@ -92,6 +93,7 @@ export const Billing = ({
   const [showMore, setShowMore] = useState(false);
   /** Returned goods: find the original bill by number, then the return screen opens */
   const [returnBillNo, setReturnBillNo] = useState("");
+  const [showReturnBox, setShowReturnBox] = useState(false);
   const [returning, setReturning] = useState<Bill | null>(null);
   const { data: allBills } = useBills();
   const [customerOpen, setCustomerOpen] = useState(false);
@@ -268,6 +270,7 @@ export const Billing = ({
     if (!bill) return setNotice(`Bill ${no} was not found in this dashboard.`);
     if (!bill.items.some((i) => i.qty - i.returned_qty > 0)) return setNotice(`Everything on bill ${bill.id} has already been returned.`);
     setShowMore(false);
+    setShowReturnBox(false);
     setReturning(bill);
   };
 
@@ -901,7 +904,7 @@ export const Billing = ({
             ))}
             {billOffer.offer && (
               <Row
-                label={`Bill offer (${billOffer.offer.percent}% on ₹${amount(billOffer.offer.min_amount)}+)`}
+                label={`Bill offer (${billOffer.offer.percent}%${billOffer.offer.min_amount > 0 ? ` on ₹${amount(billOffer.offer.min_amount)}+` : ""})`}
                 value={`− ${money(billOffer.discount)}`}
                 tone="green"
               />
@@ -974,7 +977,21 @@ export const Billing = ({
             <CreditCard className="h-[18px] w-[18px]" /> Pay &amp; Print (F12)
           </button>
 
-          <div className="relative mt-3 grid grid-cols-2 gap-2">
+          <div className="relative mt-3 grid grid-cols-3 gap-2">
+            <button
+              onClick={() => {
+                setShowMore(false);
+                setShowReturnBox((v) => !v);
+              }}
+              className="flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-[#e3e7ea] px-1 py-2.5 text-[11.5px] font-semibold text-gray-700 transition hover:bg-gray-50"
+            >
+              <Undo2 className="h-4 w-4 text-[#d97706]" />
+              <span className="leading-tight">
+                Return
+                <br />
+                Items
+              </span>
+            </button>
             <button
               onClick={holdBill}
               className="flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-[#e3e7ea] px-1 py-2.5 text-[11.5px] font-semibold text-gray-700 transition hover:bg-gray-50"
@@ -987,7 +1004,10 @@ export const Billing = ({
               </span>
             </button>
             <button
-              onClick={() => setShowMore((v) => !v)}
+              onClick={() => {
+                setShowReturnBox(false);
+                setShowMore((v) => !v);
+              }}
               className="flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-[#e3e7ea] px-1 py-2.5 text-[11.5px] font-semibold text-gray-700 transition hover:bg-gray-50"
             >
               <MoreHorizontal className="h-4 w-4 text-gray-600" />
@@ -997,6 +1017,28 @@ export const Billing = ({
                 Options
               </span>
             </button>
+
+            {showReturnBox && (
+              <div className="absolute bottom-[70px] left-0 right-0 z-30 rounded-xl border border-[#e5e7eb] bg-white p-3.5 shadow-xl sm:left-auto sm:right-0 sm:w-[268px]">
+                <p className="mb-1 text-[12.5px] font-bold text-gray-900">Return items from a bill</p>
+                <p className="mb-2 text-[11.5px] leading-snug text-gray-500">
+                  Enter the bill number. You can return part or all of it; stock goes back and a return bill is made.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    autoFocus
+                    value={returnBillNo}
+                    onChange={(e) => setReturnBillNo(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && openReturn()}
+                    placeholder="Bill no, e.g. 12"
+                    className="field"
+                  />
+                  <Button className="shrink-0 px-3 py-2 text-[12.5px]" onClick={openReturn}>
+                    Open
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {showMore && (
               <div className="absolute bottom-[70px] left-0 right-0 z-30 rounded-xl border border-[#e5e7eb] bg-white p-3.5 shadow-xl sm:left-auto sm:right-0 sm:w-[268px]">
@@ -1010,21 +1052,6 @@ export const Billing = ({
                   onChange={(e) => setBillDate(e.target.value)}
                   className="field mb-3"
                 />
-                <p className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide text-gray-500">
-                  Return items from a bill
-                </p>
-                <div className="mb-3 flex gap-2">
-                  <input
-                    value={returnBillNo}
-                    onChange={(e) => setReturnBillNo(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && openReturn()}
-                    placeholder="Bill no, e.g. 12"
-                    className="field"
-                  />
-                  <Button className="shrink-0 px-3 py-2 text-[12.5px]" onClick={openReturn}>
-                    Return
-                  </Button>
-                </div>
                 <p className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide text-gray-500">
                   Held bills ({held.length})
                 </p>

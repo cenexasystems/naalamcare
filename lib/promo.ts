@@ -41,7 +41,7 @@ export const DEFAULT_PROMO: InvoicePromo = {
     { heading: "General", rows: [{ label: "All other items", discount: "5% OFF" }] },
   ],
   footnote: "*T&C apply.",
-  color: "#e31e24",
+  color: "#0b47a8",
 };
 
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");

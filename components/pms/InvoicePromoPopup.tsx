@@ -1,8 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { HeartPulse, Pill, PillBottle, Stethoscope, Syringe, Tablets, X } from "lucide-react";
 import type { InvoicePromo } from "@/lib/promo";
+
+/** Faint medicine artwork scattered behind the offer text. */
+const BACKDROP = [
+  { Icon: Pill, cls: "-left-3 top-6 h-16 w-16 -rotate-[30deg]" },
+  { Icon: Tablets, cls: "right-2 top-24 h-14 w-14 rotate-12" },
+  { Icon: Syringe, cls: "-left-2 bottom-24 h-14 w-14 rotate-45" },
+  { Icon: PillBottle, cls: "-right-3 bottom-10 h-20 w-20 -rotate-12" },
+  { Icon: HeartPulse, cls: "left-1/2 top-1 h-10 w-10 -translate-x-1/2" },
+];
 
 /** The offer card itself, over a dimmed backdrop; ✕ or tapping outside closes it. */
 export const PromoCard = ({
@@ -35,15 +44,26 @@ export const PromoCard = ({
         <button
           onClick={onClose}
           aria-label="Close offers"
-          className="absolute -right-2.5 -top-2.5 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border-[3px] border-white bg-[#e31e24] text-white shadow-lg transition hover:scale-105"
+          style={{ backgroundColor: promo.color }}
+          className="absolute -right-2.5 -top-2.5 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border-[3px] border-white text-white shadow-lg transition hover:scale-105"
         >
           <X className="h-[18px] w-[18px]" strokeWidth={3} />
         </button>
 
         <div
-          className="max-h-[78vh] overflow-y-auto rounded-[12px] px-5 pb-5 pt-7 text-center text-white"
+          className="relative max-h-[78vh] overflow-y-auto overflow-x-hidden rounded-[12px] px-5 pb-5 pt-7 text-center text-white"
           style={{ backgroundColor: promo.color }}
         >
+          {BACKDROP.map(({ Icon, cls }, i) => (
+            <Icon key={i} aria-hidden className={`pointer-events-none absolute opacity-[0.13] ${cls}`} strokeWidth={1.6} />
+          ))}
+          <div className="relative mb-3 flex items-center justify-center gap-2">
+            {[Pill, Tablets, Syringe, Stethoscope].map((Icon, i) => (
+              <span key={i} className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20">
+                <Icon className="h-[18px] w-[18px]" aria-hidden />
+              </span>
+            ))}
+          </div>
           {promo.title && (
             <p className="text-[56px] font-black uppercase leading-[0.9] tracking-tight [overflow-wrap:anywhere]">
               {promo.title}
@@ -51,7 +71,7 @@ export const PromoCard = ({
           )}
           {promo.subtitle && <p className="mt-3 text-[15px] font-semibold leading-snug opacity-95">{promo.subtitle}</p>}
 
-          <div className="mt-5 space-y-4 text-left">
+          <div className="relative mt-5 space-y-4 rounded-xl bg-white/10 p-3 text-left">
             {promo.groups.map((group, gi) => (
               <div key={gi}>
                 {group.heading && (
@@ -70,7 +90,7 @@ export const PromoCard = ({
           </div>
 
           {(promo.footnote || shopName) && (
-            <div className="mt-5 flex items-end justify-between gap-3 text-left text-[10.5px] leading-snug opacity-90">
+            <div className="relative mt-5 flex items-end justify-between gap-3 text-left text-[10.5px] leading-snug opacity-90">
               <span>{promo.footnote}</span>
               <span className="shrink-0 font-bold">{shopName}</span>
             </div>

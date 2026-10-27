@@ -161,7 +161,7 @@ export const ModeSettingsCard = ({
       <Field
         label="Automatic bill offers"
         className="mt-4"
-        hint="Applied by itself at billing once the bill total reaches the amount. If several match, the biggest % is given."
+        hint="Applied by itself to the whole bill once its total reaches the amount (₹0 = every bill). If several match, the biggest % is given."
       >
         <div className="space-y-2">
           {offers.map((o, i) => (
@@ -169,7 +169,7 @@ export const ModeSettingsCard = ({
               <span>Bill of ₹</span>
               <TextInput
                 type="number"
-                value={o.min_amount || ""}
+                value={o.min_amount || (o.percent ? "0" : "")}
                 onChange={(e) =>
                   setOffers(offers.map((x, n) => (n === i ? { ...x, min_amount: Number(e.target.value) || 0 } : x)))
                 }

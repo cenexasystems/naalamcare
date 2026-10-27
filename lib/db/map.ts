@@ -219,7 +219,7 @@ export const mapModeSettings = (row: any, mode: Mode): ModeSettings => ({
     .sort((a, b) => a.min_packs - b.min_packs),
   bill_offers: parseJson<BillOffer[]>(row?.billOffers, [])
     .map((o) => ({ min_amount: toNum(o.min_amount), percent: toNum(o.percent) }))
-    .filter((o) => o.min_amount > 0 && o.percent > 0)
+    .filter((o) => o.min_amount >= 0 && o.percent > 0)
     .sort((a, b) => a.min_amount - b.min_amount),
   enforce_moq: Boolean(row?.enforceMoq ?? mode === "wholesale"),
   invoice_terms: row?.invoiceTerms ?? "",

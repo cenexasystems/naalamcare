@@ -14,6 +14,7 @@ import {
   Info,
   Building2,
   AlertTriangle,
+  Undo2,
 } from "lucide-react";
 import type { Batch, Bill, CartLine, Customer, DiscountTier, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
 import { calcBillOffer, calcBillTotals, round2 } from "@/lib/calc";
@@ -24,6 +25,7 @@ import { addPharmacyAtBilling, submitBill } from "@/lib/actions";
 import { Card, Pill, ScheduleBadge, ScreenHeading, Select } from "./ui";
 import { act } from "./mode-context";
 import { mutateAll, useSettings } from "./data";
+import { ReturnModal } from "./Payments";
 
 /* ==========================================================================
    Wholesale billing
@@ -103,6 +105,20 @@ export const WholesaleBilling = ({
   /** "+ New pharmacy" form in the billing panel; null = closed */
   const [newPharmacy, setNewPharmacy] = useState<{ name: string; phone: string; gstin: string; address: string } | null>(null);
   const [addingPharmacy, setAddingPharmacy] = useState(false);
+  /** Returned goods: find the original invoice by number, then the return screen opens */
+  const [showReturnBox, setShowReturnBox] = useState(false);
+  const [returnBillNo, setReturnBillNo] = useState("");
+  const [returning, setReturning] = useState<Bill | null>(null);
+
+  const openReturn = () => {
+    const no = returnBillNo.trim().toUpperCase();
+    if (!no) return setNotice("Enter the invoice number to return items from.");
+    const bill = bills.find((b) => b.id.toUpperCase() === no || b.id.toUpperCase() === `W${no}`);
+    if (!bill) return setNotice(`Invoice ${no} was not found in the wholesale dashboard.`);
+    if (!bill.items.some((i) => i.qty - i.returned_qty > 0)) return setNotice(`Everything on invoice ${bill.id} has already been returned.`);
+    setShowReturnBox(false);
+    setReturning(bill);
+  };
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const clientRef = useRef(newClientRef());
@@ -754,7 +770,37 @@ export const WholesaleBilling = ({
               ))}
               {!held.length && <span className="text-[12px] text-gray-400">None</span>}
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-3">
+            <div className="relative mt-3 grid grid-cols-3 gap-3">
+              <button
+                onClick={() => setShowReturnBox((v) => !v)}
+                className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-[#e3e7ea] py-2.5 text-[13px] font-semibold text-gray-700 transition hover:bg-gray-50"
+              >
+                <Undo2 className="h-4 w-4 text-[#d97706]" /> Return
+              </button>
+              {showReturnBox && (
+                <div className="absolute bottom-[52px] left-0 z-30 w-[280px] rounded-xl border border-[#e5e7eb] bg-white p-3.5 shadow-xl">
+                  <p className="mb-1 text-[12.5px] font-bold text-gray-900">Return items from an invoice</p>
+                  <p className="mb-2 text-[11.5px] leading-snug text-gray-500">
+                    Enter the invoice number (e.g. W3). Stock goes back, the pharmacy&rsquo;s balance is adjusted and a return bill is made.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      autoFocus
+                      value={returnBillNo}
+                      onChange={(e) => setReturnBillNo(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && openReturn()}
+                      placeholder="Invoice no"
+                      className="field"
+                    />
+                    <button
+                      onClick={openReturn}
+                      className="shrink-0 cursor-pointer rounded-lg bg-[var(--c-deep)] px-3 text-[12.5px] font-bold text-white hover:bg-[var(--c-hover)]"
+                    >
+                      Open
+                    </button>
+                  </div>
+                </div>
+              )}
               <button
                 onClick={clearBill}
                 className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-[#e3e7ea] py-2.5 text-[13px] font-semibold text-gray-700 transition hover:bg-gray-50"
@@ -913,7 +959,7 @@ export const WholesaleBilling = ({
             ))}
             {billOffer.offer && (
               <Row
-                label={`Bill offer (${billOffer.offer.percent}% on ₹${amount(billOffer.offer.min_amount)}+)`}
+                label={`Bill offer (${billOffer.offer.percent}%${billOffer.offer.min_amount > 0 ? ` on ₹${amount(billOffer.offer.min_amount)}+` : ""})`}
                 value={`− ${money(billOffer.discount)}`}
                 green
               />
@@ -1021,6 +1067,19 @@ export const WholesaleBilling = ({
           </p>
         </Card>
       </section>
+
+      <ReturnModal
+        key={returning?.id || "no-return"}
+        bill={returning}
+        role="staff"
+        onClose={() => setReturning(null)}
+        onDone={(message) => {
+          setReturning(null);
+          setReturnBillNo("");
+          mutateAll();
+          setNotice(message);
+        }}
+      />
 
       {notice && (
         <div className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-xl bg-[var(--c-deep)] px-5 py-3 text-sm font-semibold text-white shadow-xl">
