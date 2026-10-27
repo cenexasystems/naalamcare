@@ -4,7 +4,7 @@
 export const DEFAULT_PRODUCT_TYPES = ["Tablet", "Injection", "General", "Cartridge", "Bottle", "Box"];
 
 /** Purchase units a batch can be bought in (Settings → Purchase Units). */
-export const DEFAULT_PURCHASE_UNITS = ["Strip", "Piece", "Bottle"];
+export const DEFAULT_PURCHASE_UNITS = ["Strip", "Piece", "Bottle", "Cartridge"];
 
 /** Stored JSON list → clean, de-duplicated names ("" or bad data → `defaults`). */
 export const parseNameList = (raw: unknown, defaults: string[]): string[] => {
