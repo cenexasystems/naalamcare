@@ -556,7 +556,7 @@ export const InvoicePromoCard = ({
         never see it and it is not printed.
       </p>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_1fr_120px]">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_1fr_170px]">
         <Field label="Big title">
           <TextInput value={promo.title} onChange={(e) => patch({ title: e.target.value })} placeholder="OFFERS" />
         </Field>
@@ -564,12 +564,24 @@ export const InvoicePromoCard = ({
           <TextInput value={promo.subtitle} onChange={(e) => patch({ subtitle: e.target.value })} />
         </Field>
         <Field label="Card colour">
-          <input
-            type="color"
-            value={promo.color}
-            onChange={(e) => patch({ color: e.target.value })}
-            className="h-[42px] w-full cursor-pointer rounded-lg border border-[#d8dde3] bg-white p-1"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={promo.color || "#021c8b"}
+              disabled={!promo.color}
+              onChange={(e) => patch({ color: e.target.value })}
+              className="h-[42px] w-12 shrink-0 cursor-pointer rounded-lg border border-[#d8dde3] bg-white p-1 disabled:cursor-default disabled:opacity-40"
+            />
+            <label className="flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold text-gray-700">
+              <input
+                type="checkbox"
+                checked={!promo.color}
+                onChange={(e) => patch({ color: e.target.checked ? "" : "#021c8b" })}
+                className="h-4 w-4 accent-[var(--c-primary)]"
+              />
+              App colour
+            </label>
+          </div>
         </Field>
       </div>
 

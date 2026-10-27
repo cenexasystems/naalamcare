@@ -2,7 +2,7 @@ import Link from "next/link";
 import { applyModeShopDetails, getBill, getBillReturns, getModeSettings, getSettings } from "@/lib/db/queries";
 import { billShareToken, getSession, isValidBillShareToken } from "@/lib/auth";
 import { APP_NAME } from "@/lib/mode";
-import { amount, amountInWords, dateSlash, monthShort, money } from "@/lib/format";
+import { amount, amountInWords, dateSlash, monthShort, money, themeTokens } from "@/lib/format";
 import type { Bill, BillItem } from "@/lib/types";
 import { InvoiceActions } from "./InvoiceActions";
 import { InvoiceFit } from "./InvoiceFit";
@@ -170,7 +170,11 @@ export default async function InvoicePage({
 
       {/* Offer pop-up for customers opening the link we sent them — not for staff, never printed. */}
       {sharedView && modeSettings?.invoice_promo.enabled && (
-        <InvoicePromoPopup promo={modeSettings.invoice_promo} shopName={shop?.shop_name || APP_NAME} />
+        <InvoicePromoPopup
+          promo={modeSettings.invoice_promo}
+          shopName={shop?.shop_name || APP_NAME}
+          appColor={themeTokens(shopWide?.colour_theme).deep}
+        />
       )}
       <InvoiceFit>
       {/* A full A4 page: at least 297mm tall on screen (281mm inside the 8mm print margins); the item grid stretches to fill it. */}

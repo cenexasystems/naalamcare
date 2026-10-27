@@ -17,12 +17,16 @@ const BACKDROP = [
 export const PromoCard = ({
   promo,
   shopName,
+  appColor = "var(--c-deep)",
   onClose,
 }: {
   promo: InvoicePromo;
   shopName: string;
+  /** The app's theme colour, used when the pop-up has no colour of its own */
+  appColor?: string;
   onClose: () => void;
 }) => {
+  const color = promo.color || appColor;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -44,7 +48,7 @@ export const PromoCard = ({
         <button
           onClick={onClose}
           aria-label="Close offers"
-          style={{ backgroundColor: promo.color }}
+          style={{ backgroundColor: color }}
           className="absolute -right-2.5 -top-2.5 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border-[3px] border-white text-white shadow-lg transition hover:scale-105"
         >
           <X className="h-[18px] w-[18px]" strokeWidth={3} />
@@ -52,7 +56,7 @@ export const PromoCard = ({
 
         <div
           className="relative max-h-[78vh] overflow-y-auto overflow-x-hidden rounded-[12px] px-5 pb-5 pt-7 text-center text-white"
-          style={{ backgroundColor: promo.color }}
+          style={{ backgroundColor: color }}
         >
           {BACKDROP.map(({ Icon, cls }, i) => (
             <Icon key={i} aria-hidden className={`pointer-events-none absolute opacity-[0.13] ${cls}`} strokeWidth={1.6} />
@@ -102,8 +106,8 @@ export const PromoCard = ({
 };
 
 /** Customer invoice link: shows the pop-up once when the page opens. */
-export function InvoicePromoPopup({ promo, shopName }: { promo: InvoicePromo; shopName: string }) {
+export function InvoicePromoPopup({ promo, shopName, appColor }: { promo: InvoicePromo; shopName: string; appColor: string }) {
   const [open, setOpen] = useState(true);
   if (!open || !promo.enabled) return null;
-  return <PromoCard promo={promo} shopName={shopName} onClose={() => setOpen(false)} />;
+  return <PromoCard promo={promo} shopName={shopName} appColor={appColor} onClose={() => setOpen(false)} />;
 }

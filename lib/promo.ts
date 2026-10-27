@@ -13,7 +13,7 @@ export type InvoicePromo = {
   subtitle: string;
   groups: PromoGroup[];
   footnote: string;
-  /** Card background, e.g. "#e31e24" */
+  /** Card background, e.g. "#e31e24"; "" = the app's theme colour */
   color: string;
 };
 
@@ -41,7 +41,7 @@ export const DEFAULT_PROMO: InvoicePromo = {
     { heading: "General", rows: [{ label: "All other items", discount: "5% OFF" }] },
   ],
   footnote: "*T&C apply.",
-  color: "#0b47a8",
+  color: "",
 };
 
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
@@ -71,6 +71,6 @@ export const normalisePromo = (raw: unknown): InvoicePromo => {
     subtitle: text(data.subtitle, 120),
     groups,
     footnote: text(data.footnote, 160),
-    color: /^#[0-9a-f]{6}$/i.test(String(data.color)) ? String(data.color) : DEFAULT_PROMO.color,
+    color: /^#[0-9a-f]{6}$/i.test(String(data.color)) ? String(data.color) : "",
   };
 };
