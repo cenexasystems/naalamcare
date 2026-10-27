@@ -190,7 +190,7 @@ export const Purchase = ({
     if (!form.brandName.trim()) return setError("Enter the brand name.");
     if (!form.batchNo.trim()) return setError("Enter the batch number.");
     if (!form.expDate) return setError("Expiry date (EXP DT) is mandatory.");
-    if (packSize <= 0) return setError("Purchase Unit must be greater than zero.");
+    if (packSize <= 0) return setError("Enter how many units are in one pack (e.g. 10 tablets per strip, or 1).");
     if (quantity <= 0) return setError("Quantity must be greater than zero.");
     if (mrp <= 0) return setError("Enter the MRP.");
     if (sellingPrice <= 0) return setError("Enter the selling price.");
@@ -421,7 +421,7 @@ export const Purchase = ({
             )}
           </div>
 
-          <Field label="Purchase Unit" className="md:col-span-2">
+          <Field label="Pack Type" className="md:col-span-2">
             <Select
               value={form.purchaseUnitType}
               onChange={(e) => set("purchaseUnitType", e.target.value as PurchaseUnitType)}
@@ -519,7 +519,10 @@ export const Purchase = ({
         <p className="mb-2 mt-6 text-[13px] font-semibold text-gray-800">Purchase Calculation</p>
         <div className="space-y-3">
           <CalcGroup label="Stock" tone="gray">
-            <Field label="Purchase Unit">
+            <Field
+              label={form.purchaseUnitType === "Strip" ? "Tablets per strip" : `Units per ${form.purchaseUnitType.toLowerCase() || "pack"}`}
+              hint={form.purchaseUnitType === "Strip" ? "e.g. 10 — billing can sell single tablets" : "Usually 1 if it is sold whole"}
+            >
               <TextInput
                 type="number"
                 value={form.packSize}
