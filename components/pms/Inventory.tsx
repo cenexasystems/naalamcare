@@ -22,7 +22,7 @@ import {
   ArrowLeftRight,
 } from "lucide-react";
 import type { Batch, BatchRow, DrugSchedule, Medicine, MedicineWithBatches, PurchaseUnitType, StockMovement } from "@/lib/types";
-import { amount, dateSlash, expiryState, monthSlash, packNoun, scheduleLabel, timeLabel, unitNoun } from "@/lib/format";
+import { amount, dateSlash, expiryState, monthSlash, packNoun, scheduleLabel, splitsIntoUnits, timeLabel, unitNoun } from "@/lib/format";
 import { adjustStock, deleteBatch, deleteMedicine, getBatchMovements, saveBatch, saveMedicine, transferStock } from "@/lib/actions";
 import { act, useMode, useModeState } from "./mode-context";
 import { useReconciliation } from "./data";
@@ -717,7 +717,14 @@ const EditBatchModal = ({
   onSaved: () => void;
 }) => {
   // Keyed by batch id at the call site, so a fresh draft comes from mounting.
-  const [draft, setDraft] = useState<Batch | null>(batch);
+  // Items that aren't strips are sold whole. An old batch saved as "10 per bottle" is turned back
+  // into whole bottles here: 1 per pack, stock divided by the old pack size.
+  const [draft, setDraft] = useState<Batch | null>(() =>
+    batch && !splitsIntoUnits(batch.purchase_unit_type) && batch.pack_size > 1
+      ? { ...batch, pack_size: 1, stock_qty: Math.round(batch.stock_qty / batch.pack_size) }
+      : batch,
+  );
+  const fixedOldPack = !!batch && !splitsIntoUnits(batch.purchase_unit_type) && batch.pack_size > 1;
   const mode = useMode();
   const { data: settings } = useSettings();
   if (!draft) return null;
@@ -773,7 +780,10 @@ const EditBatchModal = ({
         <Field label="Purchase Unit type">
           <Select
             value={draft.purchase_unit_type}
-            onChange={(e) => set({ purchase_unit_type: e.target.value as PurchaseUnitType })}
+            onChange={(e) => {
+              const unit = e.target.value as PurchaseUnitType;
+              set({ purchase_unit_type: unit, ...(!splitsIntoUnits(unit) && { pack_size: 1 }) });
+            }}
           >
             {productTypeOptions(settings?.purchase_units ?? DEFAULT_PURCHASE_UNITS, draft.purchase_unit_type).map((u) => (
               <option key={u} value={u}>
@@ -782,9 +792,10 @@ const EditBatchModal = ({
             ))}
           </Select>
         </Field>
-        <Field label="Purchase Unit (units per pack)">
+        <Field label="Purchase Unit (units per pack)" hint={splitsIntoUnits(draft.purchase_unit_type) ? undefined : "Sold whole — always 1"}>
           <TextInput
             type="number"
+            disabled={!splitsIntoUnits(draft.purchase_unit_type)}
             value={draft.pack_size}
             onChange={(e) => set({ pack_size: Number(e.target.value) || 0 })}
           />
@@ -831,6 +842,13 @@ const EditBatchModal = ({
           <TextInput value={draft.invoice_no} onChange={(e) => set({ invoice_no: e.target.value })} />
         </Field>
       </div>
+      {fixedOldPack && (
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+          This item was saved as {batch!.pack_size} per {batch!.purchase_unit_type.toLowerCase()}, which divided its price. It is now
+          set to 1 per {batch!.purchase_unit_type.toLowerCase()} and stock changed from {batch!.stock_qty} to {draft.stock_qty}. Check the
+          stock and press Save changes.
+        </p>
+      )}
       <p className="mt-3 text-[12px] text-gray-500">
         Per unit price = Selling price ÷ Purchase Unit ={" "}
         <b>₹{amount(draft.pack_size ? draft.selling_price / draft.pack_size : 0)}</b> · Discount = MRP −
