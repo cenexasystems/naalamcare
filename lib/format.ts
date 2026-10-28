@@ -228,9 +228,6 @@ export const scheduleLabel = (schedule: string): string =>
 
 export const scheduleIsOtc = (schedule: string): boolean => schedule === "OTC";
 
-/** Only strips are split into single units (tablets). Bottles, pieces, tubes… are always sold whole. */
-export const splitsIntoUnits = (unitType: string): boolean => unitType === "Strip";
-
 /** Sellable unit noun for a purchase unit type */
 export const unitNoun = (unitType: string, packSize: number): string => {
   if (unitType === "Strip") return packSize > 1 ? "Tablets" : "Tablet";

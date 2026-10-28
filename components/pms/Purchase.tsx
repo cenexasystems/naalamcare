@@ -10,7 +10,7 @@ import {
   calcStockAdded,
   calcTotal,
 } from "@/lib/calc";
-import { amount, monthShort, packNoun, todayIso, unitNoun, splitsIntoUnits } from "@/lib/format";
+import { amount, monthShort, packNoun, todayIso, unitNoun } from "@/lib/format";
 import { useSettings } from "./data";
 import { DEFAULT_PRODUCT_TYPES, DEFAULT_PURCHASE_UNITS, productTypeOptions } from "@/lib/product-types";
 import { saveBatch, saveMedicine, saveSupplier } from "@/lib/actions";
@@ -143,9 +143,7 @@ export const Purchase = ({
 
   /* --------------------------- auto calculations ------------------------- */
   const singleItem = isSingleItem(form.productType);
-  // Only strips divide into tablets; a lotion or bottle is always one unit, so its price is never divided.
-  const splits = !singleItem && splitsIntoUnits(form.purchaseUnitType);
-  const packSize = splits ? Number(form.packSize) || 0 : 1;
+  const packSize = singleItem ? 1 : Number(form.packSize) || 0;
   const stripsPerBox = singleItem ? 0 : Math.max(0, Math.floor(Number(form.stripsPerBox) || 0));
   const quantity = Number(form.quantity) || 0;
   const packWord = packNoun(form.purchaseUnitType);
@@ -539,18 +537,17 @@ export const Purchase = ({
               <CalcReadonly label="Pack" value="1 piece (General item)" />
             ) : (
             <>
-            {splits ? (
-              <Field label="Tablets per strip" hint="e.g. 10 — billing can sell single tablets">
-                <TextInput
-                  type="number"
-                  value={form.packSize}
-                  onChange={(e) => set("packSize", e.target.value)}
-                  placeholder="10"
-                />
-              </Field>
-            ) : (
-              <CalcReadonly label="Pack" value={`Sold whole — 1 per ${form.purchaseUnitType.toLowerCase() || "piece"}`} />
-            )}
+            <Field
+              label={form.purchaseUnitType === "Strip" ? "Tablets per strip" : `Units per ${form.purchaseUnitType.toLowerCase() || "pack"}`}
+              hint={form.purchaseUnitType === "Strip" ? "e.g. 10 — billing can sell single tablets" : "Usually 1 if it is sold whole"}
+            >
+              <TextInput
+                type="number"
+                value={form.packSize}
+                onChange={(e) => set("packSize", e.target.value)}
+                placeholder="10"
+              />
+            </Field>
             <Field label={`${packWord} per box`}>
               <TextInput
                 type="number"
