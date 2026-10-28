@@ -23,6 +23,10 @@ export type { ReceiveDraft } from "./PurchaseExtras";
 /** Dropdown options requested by the client (slide 9 / 10) */
 const SCHEDULES: DrugSchedule[] = ["H", "H1", "X", "NRX", "OTC", "General"];
 
+/** General items (lotions, face wash…) are always sold whole: one piece per pack, no boxes. */
+const isSingleItem = (productType: string) => productType === "General";
+const SINGLE_ITEM = { purchaseUnitType: "Piece" as PurchaseUnitType, packSize: "1", stripsPerBox: "" };
+
 const blankForm = (defaultGst = 12) => ({
   supplierId: "",
   supplierName: "",
@@ -132,13 +136,15 @@ export const Purchase = ({
       box: last?.box || prev.box,
       packSize: last ? String(last.pack_size) : prev.packSize,
       stripsPerBox: last?.strips_per_box ? String(last.strips_per_box) : prev.stripsPerBox,
+      ...(isSingleItem(medicine.product_type) && SINGLE_ITEM),
     }));
     setShowResults(false);
   };
 
   /* --------------------------- auto calculations ------------------------- */
-  const packSize = Number(form.packSize) || 0;
-  const stripsPerBox = Math.max(0, Math.floor(Number(form.stripsPerBox) || 0));
+  const singleItem = isSingleItem(form.productType);
+  const packSize = singleItem ? 1 : Number(form.packSize) || 0;
+  const stripsPerBox = singleItem ? 0 : Math.max(0, Math.floor(Number(form.stripsPerBox) || 0));
   const quantity = Number(form.quantity) || 0;
   const packWord = packNoun(form.purchaseUnitType);
   /** Whole boxes in the quantity entered (blank when it isn't a whole number of boxes) */
@@ -177,6 +183,7 @@ export const Purchase = ({
       packSize: String(draft.pack_size || ""),
       quantity: String(draft.packs || ""),
       purchaseRate: draft.rate ? String(draft.rate) : "",
+      ...(isSingleItem(medicine?.product_type || "") && SINGLE_ITEM),
     }));
     setTab("receipt");
   };
@@ -220,7 +227,7 @@ export const Purchase = ({
       product_type: form.productType,
       hsn_code: form.hsnCode.trim(),
       gst_percent: Number(form.gst) || 0,
-      purchase_unit_type: form.purchaseUnitType,
+      purchase_unit_type: singleItem ? "Piece" : form.purchaseUnitType,
       ...(!form.medicineId && { low_stock_threshold: settings?.low_stock_threshold ?? 10 }),
     }));
     if (!savedMedicine.ok) return;
@@ -237,7 +244,7 @@ export const Purchase = ({
       mfg_date: form.mfgDate,
       exp_date: form.expDate,
       box: form.box.trim().toUpperCase(),
-      purchase_unit_type: form.purchaseUnitType,
+      purchase_unit_type: singleItem ? "Piece" : form.purchaseUnitType,
       pack_size: packSize,
       strips_per_box: stripsPerBox,
       qty_packs: quantity,
@@ -424,6 +431,7 @@ export const Purchase = ({
           <Field label="Pack Type" className="md:col-span-2">
             <Select
               value={form.purchaseUnitType}
+              disabled={singleItem}
               onChange={(e) => set("purchaseUnitType", e.target.value as PurchaseUnitType)}
             >
               {productTypeOptions(purchaseUnits, form.purchaseUnitType).map((unit) => (
@@ -448,7 +456,13 @@ export const Purchase = ({
           </Field>
 
           <Field label="Product Type" className="md:col-span-3">
-            <Select value={form.productType} onChange={(e) => set("productType", e.target.value)}>
+            <Select
+              value={form.productType}
+              onChange={(e) => {
+                const productType = e.target.value;
+                setForm((prev) => ({ ...prev, productType, ...(isSingleItem(productType) && SINGLE_ITEM) }));
+              }}
+            >
               <option value="">— Select —</option>
               {productTypeOptions(productTypes, form.productType).map((t) => (
                 <option key={t} value={t}>
@@ -519,6 +533,10 @@ export const Purchase = ({
         <p className="mb-2 mt-6 text-[13px] font-semibold text-gray-800">Purchase Calculation</p>
         <div className="space-y-3">
           <CalcGroup label="Stock" tone="gray">
+            {singleItem ? (
+              <CalcReadonly label="Pack" value="1 piece (General item)" />
+            ) : (
+            <>
             <Field
               label={form.purchaseUnitType === "Strip" ? "Tablets per strip" : `Units per ${form.purchaseUnitType.toLowerCase() || "pack"}`}
               hint={form.purchaseUnitType === "Strip" ? "e.g. 10 — billing can sell single tablets" : "Usually 1 if it is sold whole"}
@@ -550,6 +568,8 @@ export const Purchase = ({
                   placeholder="2"
                 />
               </Field>
+            )}
+            </>
             )}
             <Field label={`Quantity (${packWord})`}>
               <TextInput

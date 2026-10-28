@@ -22,7 +22,8 @@ const GST_SLABS = [0, 5, 12, 18, 28];
 
 /** "15GM UNI" style pack descriptor — pack size + unit abbreviation. */
 const packLabel = (item: BillItem): string => {
-  const unit = item.purchase_unit_type === "Strip" ? "UNI" : item.purchase_unit_type.slice(0, 3).toUpperCase();
+  const short: Record<string, string> = { Strip: "UNI", Piece: "PCS", Bottle: "BTL" };
+  const unit = short[item.purchase_unit_type] ?? item.purchase_unit_type.slice(0, 3).toUpperCase();
   return `${item.pack_size || 1}${unit}`;
 };
 
