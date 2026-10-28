@@ -889,11 +889,6 @@ export const Billing = ({
 
           <div className="space-y-2.5 text-[13px]">
             <Row label={`Sub Total (${totals.itemCount} Items)`} value={money(totals.subTotal)} />
-            <Row
-              label="Discount (MRP to selling)"
-              value={money(totals.discount)}
-              tone={totals.discount > 0 ? "green" : undefined}
-            />
             {typeDiscount.parts.map((p) => (
               <Row
                 key={p.type}

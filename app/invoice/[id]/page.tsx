@@ -240,7 +240,7 @@ export default async function InvoicePage({
           <thead>
             <tr className="bg-[#d9d9d9]">
               {["No", "Type", "Product Name", "Pack", "Mfr", "Batch", "Exp", "MRP", "Qty", "Rate", "Disc %", "GST%", "Amount", "HSN"].map((h) => (
-                <th key={h} className="border border-black px-1 py-1 text-center font-bold">{h}</th>
+                <th key={h} className="border border-black whitespace-nowrap px-1 py-1 text-center font-bold">{h}</th>
               ))}
             </tr>
           </thead>
@@ -258,12 +258,12 @@ export default async function InvoicePage({
                 <td className="border border-black px-1 py-0.5 text-center">{mfrLabel(item)}</td>
                 <td className="border border-black px-1 py-0.5 text-center">{item.batch_no}</td>
                 <td className="border border-black px-1 py-0.5 text-center">{monthShort(item.exp_date)}</td>
-                <td className="border border-black px-1 py-0.5 text-right">{amount(item.mrp_per_unit)}</td>
-                <td className="border border-black px-1 py-0.5 text-right">{item.qty}</td>
-                <td className="border border-black px-1 py-0.5 text-right">{amount(item.per_unit_price)}</td>
-                <td className="border border-black px-1 py-0.5 text-center">{discPercent(bill, item).toFixed(2)}%</td>
-                <td className="border border-black px-1 py-0.5 text-center">{amount(item.gst_percent)}</td>
-                <td className="border border-black px-1 py-0.5 text-right font-bold">{amount(netLineAmount(bill, item))}</td>
+                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{amount(item.mrp_per_unit)}</td>
+                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{item.qty}</td>
+                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{amount(item.per_unit_price)}</td>
+                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-center">{discPercent(bill, item).toFixed(2)}%</td>
+                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-center">{amount(item.gst_percent)}</td>
+                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right font-bold">{amount(netLineAmount(bill, item))}</td>
                 <td className="border border-black px-1 py-0.5 text-center">{item.hsn_code}</td>
               </tr>
             ))}
@@ -334,7 +334,7 @@ export default async function InvoicePage({
                 </tr>
                 <tr>
                   <td className="border border-black px-1 py-0.5">
-                    Discount{bill.sub_total > 0 && savedAmount > 0 ? ` (${((savedAmount / bill.sub_total) * 100).toFixed(2)}%)` : ""}
+                    Discount Amount
                   </td>
                   <td className="border border-black px-1 py-0.5 text-right">{amount(Math.max(0, bill.sub_total - bill.grand_total))}</td>
                 </tr>
