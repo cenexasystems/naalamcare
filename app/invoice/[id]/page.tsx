@@ -4,6 +4,7 @@ import { billShareToken, getSession, isValidBillShareToken } from "@/lib/auth";
 import { APP_NAME } from "@/lib/mode";
 import { amount, amountInWords, dateSlash, monthShort, money, themeTokens } from "@/lib/format";
 import type { Bill, BillItem } from "@/lib/types";
+import { lineTypePercents, type TypeDiscountRule } from "@/lib/type-discounts";
 import { InvoiceActions } from "./InvoiceActions";
 import { InvoiceFit } from "./InvoiceFit";
 import { InvoicePromoPopup } from "@/components/pms/InvoicePromoPopup";
@@ -34,18 +35,23 @@ const mfrLabel = (item: BillItem): string => {
   return maker.replace(/[^A-Za-z ]/g, "").trim().slice(0, 10);
 };
 
-/** Share of the selling-price total actually charged after bill-level discounts (offers, counter discount). */
-const chargedFactor = (bill: Bill): number => {
-  const lines = linesTotal(bill);
-  return lines > 0 ? bill.grand_total / lines : 1;
+/**
+ * What each line actually cost the customer, after every discount. The product-type discount
+ * (Tablet 10%, General 5%…) is taken off each line at its own rate; the bill-wide offer and the
+ * counter discount are then shared across lines so they add up exactly to the bill total.
+ */
+const netLineAmounts = (bill: Bill, rules: TypeDiscountRule[]): number[] => {
+  const lines = bill.items.map((i) => ({ product_type: i.product_type, amount: Number(i.line_amount) || 0 }));
+  const pcts = lineTypePercents(rules, lines);
+  const afterType = lines.map((l, i) => l.amount * (1 - pcts[i] / 100));
+  const sum = afterType.reduce((s, x) => s + x, 0);
+  const factor = sum > 0 ? bill.grand_total / sum : 1;
+  return afterType.map((x) => x * factor);
 };
 
-/** What this line actually cost the customer, after every discount. */
-const netLineAmount = (bill: Bill, item: BillItem): number => (Number(item.line_amount) || 0) * chargedFactor(bill);
-
 /** Total discount on the line as a % of its MRP: MRP-to-selling plus the bill's offers / counter discount. */
-const discPercent = (bill: Bill, item: BillItem): number =>
-  item.line_mrp > 0 ? Math.max(0, ((item.line_mrp - netLineAmount(bill, item)) / item.line_mrp) * 100) : 0;
+const discPercent = (item: BillItem, net: number): number =>
+  item.line_mrp > 0 ? Math.max(0, ((item.line_mrp - net) / item.line_mrp) * 100) : 0;
 
 
 /** Selling-price total of the lines, before any counter discount. */
@@ -99,6 +105,7 @@ export default async function InvoicePage({
   const shopWide = await getSettings();
   const shop = shopWide && modeSettings ? applyModeShopDetails(shopWide, modeSettings) : shopWide;
   const wholesale = bill?.mode === "wholesale";
+  const netAmounts = bill ? netLineAmounts(bill, modeSettings?.type_discounts ?? []) : [];
   // Returns change what the customer finally paid: the invoice lists them and shows the revised total.
   const returns = bill && bill.returned_amount > 0 ? await getBillReturns(bill.id) : [];
   const revisedTotal = bill ? Math.max(0, bill.grand_total - bill.returned_amount) : 0;
@@ -262,9 +269,9 @@ export default async function InvoicePage({
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{amount(item.mrp_per_unit)}</td>
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{item.qty}</td>
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{amount(item.per_unit_price)}</td>
-                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-center">{discPercent(bill, item).toFixed(2)}%</td>
+                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-center">{discPercent(item, netAmounts[index]).toFixed(2)}%</td>
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-center">{amount(item.gst_percent)}</td>
-                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right font-bold">{amount(netLineAmount(bill, item))}</td>
+                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right font-bold">{amount(netAmounts[index])}</td>
                 <td className="border border-black px-1 py-0.5 text-center">{item.hsn_code}</td>
               </tr>
             ))}

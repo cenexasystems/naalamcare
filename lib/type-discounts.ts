@@ -1,6 +1,7 @@
 /* ==========================================================================
    Automatic discounts by product type, applied at billing (Settings →
-   Product-type Discounts, per dashboard).
+   Product-type Discounts, per dashboard). Items whose type has no rule of
+   its own fall under the "General" rule, if there is one.
 
    For each product type with rules, the bill's lines of that type are added
    up; that total falls into exactly one band, and the band's % comes off
@@ -73,6 +74,16 @@ export const normaliseTypeDiscounts = (raw: unknown): TypeDiscountRule[] => {
 
 export type TypeDiscountPart = { type: string; subtotal: number; percent: number; discount: number };
 
+/** Items whose type has no rule of its own (Cartridge, Bottle, not set…) count as "General" — "all other items". */
+const FALLBACK_TYPE = "general";
+
+/** Which rule a product type is billed under (lower-case), or "" when none applies. */
+const ruleKeyFor = (rules: TypeDiscountRule[], productType?: string): string => {
+  const key = (productType || "").trim().toLowerCase();
+  if (key && rules.some((r) => r.type.toLowerCase() === key)) return key;
+  return rules.some((r) => r.type.toLowerCase() === FALLBACK_TYPE) ? FALLBACK_TYPE : "";
+};
+
 /** Discount for each product type on the bill, and the total. Lines carry their amount after per-line discounts. */
 export const calcTypeDiscounts = (
   rules: TypeDiscountRule[],
@@ -81,11 +92,20 @@ export const calcTypeDiscounts = (
   const parts: TypeDiscountPart[] = [];
   for (const rule of rules) {
     const key = rule.type.toLowerCase();
-    const subtotal = r2(lines.filter((l) => (l.product_type || "").toLowerCase() === key).reduce((s, l) => s + n(l.amount), 0));
+    const subtotal = r2(lines.filter((l) => ruleKeyFor(rules, l.product_type) === key).reduce((s, l) => s + n(l.amount), 0));
     if (subtotal <= 0) continue;
     const band = rule.bands.find((b) => subtotal >= b.from && (b.to === 0 || subtotal < b.to));
     if (!band) continue;
     parts.push({ type: rule.type, subtotal, percent: band.percent, discount: r2((subtotal * band.percent) / 100) });
   }
   return { total: r2(parts.reduce((s, p) => s + p.discount, 0)), parts };
+};
+
+/** The product-type discount % each line got on this bill (by line index), worked out the same way as at billing. */
+export const lineTypePercents = (
+  rules: TypeDiscountRule[],
+  lines: { product_type?: string; amount: number }[],
+): number[] => {
+  const byType = new Map(calcTypeDiscounts(rules, lines).parts.map((p) => [p.type.toLowerCase(), p.percent]));
+  return lines.map((l) => byType.get(ruleKeyFor(rules, l.product_type)) ?? 0);
 };
