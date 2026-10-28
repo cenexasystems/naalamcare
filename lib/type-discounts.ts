@@ -1,7 +1,7 @@
 /* ==========================================================================
    Automatic discounts by product type, applied at billing (Settings →
    Product-type Discounts, per dashboard). Items whose type has no rule of
-   its own fall under the "General" rule, if there is one.
+   its own get no type discount.
 
    For each product type with rules, the bill's lines of that type are added
    up; that total falls into exactly one band, and the band's % comes off
@@ -74,14 +74,10 @@ export const normaliseTypeDiscounts = (raw: unknown): TypeDiscountRule[] => {
 
 export type TypeDiscountPart = { type: string; subtotal: number; percent: number; discount: number };
 
-/** Items whose type has no rule of its own (Cartridge, Bottle, not set…) count as "General" — "all other items". */
-const FALLBACK_TYPE = "general";
-
-/** Which rule a product type is billed under (lower-case), or "" when none applies. */
+/** Which rule a product type is billed under (lower-case), or "" when it has no rule — those items get no type discount. */
 const ruleKeyFor = (rules: TypeDiscountRule[], productType?: string): string => {
   const key = (productType || "").trim().toLowerCase();
-  if (key && rules.some((r) => r.type.toLowerCase() === key)) return key;
-  return rules.some((r) => r.type.toLowerCase() === FALLBACK_TYPE) ? FALLBACK_TYPE : "";
+  return key && rules.some((r) => r.type.toLowerCase() === key) ? key : "";
 };
 
 /** Discount for each product type on the bill, and the total. Lines carry their amount after per-line discounts. */
