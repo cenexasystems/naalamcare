@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Save, Plus, Trash2, GitMerge, Pencil } from "lucide-react";
+import { Save, Plus, Trash2, GitMerge, Pencil, Bell } from "lucide-react";
 import type { ActionResult, BillOffer, DiscountTier, ModeSettings, PaymentMethod } from "@/lib/types";
 import { MODE_LABEL, type Mode } from "@/lib/mode";
 import { amount, monthShort } from "@/lib/format";
@@ -14,6 +14,7 @@ import {
   saveInvoicePromo,
   savePurchaseUnits,
   saveAutoDiscounts,
+  saveAlertSettings,
   addDiscountCategory,
   renameDiscountCategory,
   deleteDiscountCategory,
@@ -25,6 +26,7 @@ import {
 import { Button, Card, Field, Modal, Pill, Select, TextInput } from "./ui";
 import { act, useMode, useModeState } from "./mode-context";
 import { useReconciliation } from "./data";
+import { playAlarmBeep } from "@/lib/alarm";
 import { PromoCard } from "./InvoicePromoPopup";
 import { validateAutoDiscounts, type AutoDiscountConfig, type DiscountCategory } from "@/lib/auto-discounts";
 import { normalisePromo, type InvoicePromo, type PromoGroup, type PromoRow } from "@/lib/promo";
@@ -1297,6 +1299,93 @@ export const UsersCard = ({ onChanged }: { onChanged: (message?: string) => void
           </div>
         )}
       </Modal>
+    </Card>
+  );
+};
+
+/** An on/off switch row. */
+const SwitchRow = ({
+  on,
+  label,
+  hint,
+  disabled,
+  onToggle,
+}: {
+  on: boolean;
+  label: string;
+  hint: string;
+  disabled?: boolean;
+  onToggle: () => void;
+}) => (
+  <button
+    onClick={onToggle}
+    disabled={disabled}
+    className="flex w-full cursor-pointer items-center justify-between gap-4 rounded-lg border border-[#e5e7eb] px-4 py-3 text-left transition hover:bg-gray-50 disabled:cursor-wait"
+  >
+    <span>
+      <span className="block text-[13.5px] font-semibold text-gray-900">{label}</span>
+      <span className="block text-[11.5px] text-gray-500">{hint}</span>
+    </span>
+    <span
+      role="switch"
+      aria-checked={on}
+      className={`relative h-6 w-11 shrink-0 rounded-full transition ${on ? "bg-[var(--c-primary)]" : "bg-gray-300"}`}
+    >
+      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${on ? "left-[22px]" : "left-0.5"}`} />
+    </span>
+  </button>
+);
+
+/* ------------------------------------------------------------------------
+   Notifications — stock alert pop-ups and the alarm sound, per dashboard.
+   ------------------------------------------------------------------------ */
+
+export const NotificationsCard = ({
+  settings,
+  onChanged,
+}: {
+  settings: ModeSettings;
+  onChanged: (message?: string) => void;
+}) => {
+  const mode = useMode();
+  const [popup, setPopup] = useState(settings.alert_popup);
+  const [sound, setSound] = useState(settings.alert_sound);
+  const [saving, setSaving] = useState(false);
+
+  const save = async (next: { popup: boolean; sound: boolean }) => {
+    setPopup(next.popup);
+    setSound(next.sound);
+    setSaving(true);
+    const res = await act(saveAlertSettings(mode, next));
+    setSaving(false);
+    if (res.ok) onChanged(`${MODE_LABEL[mode]} notifications saved.`);
+  };
+
+  return (
+    <Card className="mt-4 p-5">
+      <h3 className="mb-1 text-[15px] font-bold text-gray-900">Notifications</h3>
+      <p className="mb-4 text-[12px] text-gray-500">
+        Low-stock, out-of-stock and expiry alerts for the {mode} dashboard. Applies to everyone using it.
+      </p>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <SwitchRow
+          disabled={saving}
+          on={popup}
+          label="Stock alert pop-ups"
+          hint="Low-stock notice on every screen, and the Inventory alert"
+          onToggle={() => save({ popup: !popup, sound })}
+        />
+        <SwitchRow
+          disabled={saving}
+          on={sound}
+          label="Alarm sound"
+          hint="Beep when a stock alert pops up"
+          onToggle={() => save({ popup, sound: !sound })}
+        />
+      </div>
+      <Button variant="ghost" className="mt-3 py-2 text-[13px]" onClick={() => playAlarmBeep()}>
+        <Bell className="h-4 w-4" /> Test sound
+      </Button>
     </Card>
   );
 };

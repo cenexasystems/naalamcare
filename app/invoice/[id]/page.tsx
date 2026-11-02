@@ -100,7 +100,8 @@ export default async function InvoicePage({
   // Returns get their own return invoice; this one stays exactly as billed. Staff see links to them.
   const returns = bill && bill.returned_amount > 0 ? await getBillReturns(bill.id) : [];
   /** MRP value of everything on the bill minus what the customer paid: every discount together. */
-  const savedAmount = bill ? Math.max(0, Math.round((bill.sub_total - bill.grand_total) * 100) / 100) : 0;
+  // MRP value of everything bought minus what was paid, plus the MRP value of free items from offers.
+  const savedAmount = bill ? Math.max(0, Math.round((bill.sub_total - bill.grand_total + bill.offer_savings) * 100) / 100) : 0;
   const terms = (modeSettings?.invoice_terms || "")
     .split("\n")
     .map((t) => t.trim())
@@ -262,6 +263,11 @@ export default async function InvoicePage({
                   <p className="font-bold uppercase">{item.generic_name}</p>
                   {item.brand_name && <p>{item.brand_name}</p>}
                   {item.schedule && <p className="text-[8.5px]">[{item.schedule}]</p>}
+                  {item.is_free && (
+                    <p className="text-[8.5px] font-bold">
+                      <span className="rounded-sm border border-black px-0.5">FREE</span> {item.offer_name}
+                    </p>
+                  )}
                 </td>
                 <td className="border border-black px-1 py-0.5 text-center">{packLabel(item)}</td>
                 <td className="border border-black px-1 py-0.5 text-center">{mfrLabel(item)}</td>
@@ -270,7 +276,7 @@ export default async function InvoicePage({
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{amount(item.mrp_per_unit)}</td>
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{item.qty}</td>
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{amount(item.per_unit_price)}</td>
-                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-center">{discPercent(item, netAmounts[index]).toFixed(2)}%</td>
+                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-center">{item.is_free ? "FREE" : `${discPercent(item, netAmounts[index]).toFixed(2)}%`}</td>
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-center">{amount(item.gst_percent)}</td>
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right font-bold">{amount(netAmounts[index])}</td>
                 <td className="border border-black px-1 py-0.5 text-center">{item.hsn_code}</td>
@@ -388,7 +394,7 @@ export default async function InvoicePage({
 
         {!wholesale && savedAmount > 0 && (
           <p className="inv-break mt-1 rounded border border-black px-2 py-1 text-center text-[11px] font-bold">
-            You saved {money(savedAmount)} on this bill (MRP {money(bill.sub_total)} − you paid {money(bill.grand_total)})
+            You saved {money(savedAmount)} on this bill{bill.offer_savings > 0 ? ` (incl. free items worth ${money(bill.offer_savings)})` : ` (MRP ${money(bill.sub_total)} − you paid ${money(bill.grand_total)})`}
           </p>
         )}
 

@@ -654,6 +654,9 @@ export const submitBill = (payload: {
       auto_category: "",
       auto_percent: 0,
       auto_discount: 0,
+      is_free: false,
+      offer_id: null,
+      offer_name: "",
     }));
 
     // Deduct stock from the exact batch that was billed
@@ -694,6 +697,7 @@ export const submitBill = (payload: {
       returned_amount: 0,
       auto_discount: 0,
       auto_slab: "",
+      offer_savings: 0,
       shipping_address: "",
       customer_gstin: "",
       items,

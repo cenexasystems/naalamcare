@@ -31,7 +31,9 @@ import {
   mapPurchaseReturn,
   mapPurchaseOrder,
   mapStockMovement,
+  mapOffer,
 } from "./map";
+import type { Offer } from "../offers";
 import { syncCategories, type AutoDiscountConfig } from "../auto-discounts";
 
 /* ==========================================================================
@@ -206,7 +208,15 @@ export async function getScopedSettings(mode: Mode): Promise<ScopedSettings | nu
   const synced = syncCategories(modeSettings.auto_discounts, shop.product_types);
   // Retail only — see getAutoDiscountConfig.
   const withCategories = { ...modeSettings, auto_discounts: mode === "retail" ? synced : { ...synced, enabled: false } };
-  return { ...applyModeShopDetails(shop, withCategories), mode_settings: withCategories };
+  const offers = mode === "retail" ? await listOffers(mode) : [];
+  return { ...applyModeShopDetails(shop, withCategories), mode_settings: withCategories, offers };
+}
+
+/** Offers & free gifts for a dashboard (retail only), newest first. */
+export async function listOffers(mode: Mode): Promise<Offer[]> {
+  if (mode !== "retail") return [];
+  const rows = await db.select().from(schema.offers).where(eq(schema.offers.mode, mode)).orderBy(desc(schema.offers.createdAt));
+  return rows.map(mapOffer);
 }
 
 /**

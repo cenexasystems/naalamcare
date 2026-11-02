@@ -514,3 +514,41 @@ ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "auto_slab" text DEFAULT '' NOT NUL
 ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "auto_category" text DEFAULT '' NOT NULL;
 ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "auto_percent" numeric(5, 2) DEFAULT '0' NOT NULL;
 ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "auto_discount" numeric(12, 2) DEFAULT '0' NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 18. Offers & free gifts (retail): Buy X Get Y, gift with a product, gift
+--     above a bill amount. Free items are ₹0 bill lines marked is_free that
+--     keep the offer's name, so old invoices never change.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS "offers" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"mode" text DEFAULT 'retail' NOT NULL,
+	"name" text NOT NULL,
+	"description" text DEFAULT '' NOT NULL,
+	"type" text NOT NULL,
+	"buy_medicine_id" uuid,
+	"buy_qty" integer DEFAULT 1 NOT NULL,
+	"reward_medicine_id" uuid NOT NULL,
+	"reward_qty" integer DEFAULT 1 NOT NULL,
+	"min_bill" numeric(12, 2) DEFAULT '0' NOT NULL,
+	"repeatable" boolean DEFAULT true NOT NULL,
+	"max_free_per_bill" integer DEFAULT 0 NOT NULL,
+	"starts_on" text DEFAULT '' NOT NULL,
+	"ends_on" text DEFAULT '' NOT NULL,
+	"active" boolean DEFAULT true NOT NULL,
+	"priority" integer DEFAULT 0 NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "offers_type_check" CHECK ("type" IN ('buy_get', 'bill_gift'))
+);
+ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "is_free" boolean DEFAULT false NOT NULL;
+ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "offer_id" uuid;
+ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "offer_name" text DEFAULT '' NOT NULL;
+ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "offer_savings" numeric(12, 2) DEFAULT '0' NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 19. Stock alert switches per dashboard (Settings → Notifications)
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "alert_popup" boolean DEFAULT true NOT NULL;
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "alert_sound" boolean DEFAULT true NOT NULL;

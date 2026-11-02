@@ -178,6 +178,8 @@ export const bills = pgTable(
     /** Automatic category-wise discount on this bill, and the slab that chose it (snapshot) */
     autoDiscount: numeric("auto_discount", { precision: 12, scale: 2 }).notNull().default("0"),
     autoSlab: text("auto_slab").notNull().default(""),
+    /** MRP value of the free items given by offers on this bill */
+    offerSavings: numeric("offer_savings", { precision: 12, scale: 2 }).notNull().default("0"),
     shippingAddress: text("shipping_address").notNull().default(""),
     customerGstin: text("customer_gstin").notNull().default(""),
     /** Idempotency key from the billing screen — a double-submit returns the first bill. */
@@ -228,6 +230,10 @@ export const billItems = pgTable(
     autoCategory: text("auto_category").notNull().default(""),
     autoPercent: numeric("auto_percent", { precision: 5, scale: 2 }).notNull().default("0"),
     autoDiscount: numeric("auto_discount", { precision: 12, scale: 2 }).notNull().default("0"),
+    /** Free item given by an offer (₹0 line), and the offer — kept even if the offer is later edited or deleted */
+    isFree: boolean("is_free").notNull().default(false),
+    offerId: uuid("offer_id"),
+    offerName: text("offer_name").notNull().default(""),
   },
   (table) => [index("bill_items_bill_idx").on(table.billId)],
 );
@@ -282,6 +288,9 @@ export const modeSettings = pgTable("mode_settings", {
   invoiceTerms: text("invoice_terms").notNull().default(""),
   /** JSON: offer pop-up on customer invoice links (see lib/promo.ts); "" = default, switched off */
   invoicePromo: text("invoice_promo").notNull().default(""),
+  /** Stock alerts (low / out of stock / expiry): show the pop-up, and ring the alarm sound */
+  alertPopup: boolean("alert_popup").notNull().default(true),
+  alertSound: boolean("alert_sound").notNull().default(true),
   /** JSON: automatic discounts by product type (see lib/type-discounts.ts) */
   typeDiscounts: text("type_discounts").notNull().default("[]"),
   /** JSON: automatic category-wise discounts by bill slab (lib/auto-discounts.ts); "" = not set up */
@@ -439,4 +448,30 @@ export const loginPasscodes = pgTable("login_passcodes", {
   role: text("role").primaryKey(),
   passcodeHash: text("passcode_hash").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* --------------------------------------------------------------------------
+   Offers & free gifts (Settings → Offers; retail). See lib/offers.ts.
+   Bills keep the offer name on their free lines, so editing or deleting an
+   offer never changes old invoices.
+   -------------------------------------------------------------------------- */
+export const offers = pgTable("offers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  mode: text("mode").notNull().default("retail"),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  /** "buy_get" | "bill_gift" */
+  type: text("type").notNull(),
+  buyMedicineId: uuid("buy_medicine_id"),
+  buyQty: integer("buy_qty").notNull().default(1),
+  rewardMedicineId: uuid("reward_medicine_id").notNull(),
+  rewardQty: integer("reward_qty").notNull().default(1),
+  minBill: numeric("min_bill", { precision: 12, scale: 2 }).notNull().default("0"),
+  repeatable: boolean("repeatable").notNull().default(true),
+  maxFreePerBill: integer("max_free_per_bill").notNull().default(0),
+  startsOn: text("starts_on").notNull().default(""),
+  endsOn: text("ends_on").notNull().default(""),
+  active: boolean("active").notNull().default(true),
+  priority: integer("priority").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

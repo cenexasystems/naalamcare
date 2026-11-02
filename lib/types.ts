@@ -7,6 +7,7 @@ import type { Mode } from "./mode";
 import type { InvoicePromo } from "./promo";
 import type { TypeDiscountRule } from "./type-discounts";
 import type { AutoDiscountConfig } from "./auto-discounts";
+import type { Offer } from "./offers";
 export type { Mode } from "./mode";
 
 /** Server actions return this instead of throwing, so messages survive production builds. */
@@ -191,6 +192,10 @@ export type BillItem = {
   auto_category: string;
   auto_percent: number;
   auto_discount: number;
+  /** A free item given by an offer (₹0), and which offer (snapshot) */
+  is_free: boolean;
+  offer_id: string | null;
+  offer_name: string;
 };
 
 export type Bill = {
@@ -239,6 +244,8 @@ export type Bill = {
   /** Automatic category-wise discount on the bill, and the slab it fell in (snapshot) */
   auto_discount: number;
   auto_slab: string;
+  /** MRP value of free items given by offers on this bill */
+  offer_savings: number;
   shipping_address: string;
   customer_gstin: string;
   items: BillItem[];
@@ -346,6 +353,9 @@ export type ModeSettings = {
   invoice_terms: string;
   /** Offer pop-up shown on the customer invoice link */
   invoice_promo: InvoicePromo;
+  /** Stock alerts: show pop-ups / play the alarm sound (Settings → Notifications) */
+  alert_popup: boolean;
+  alert_sound: boolean;
   /** Automatic % off by product type, banded by that type's total on the bill */
   type_discounts: TypeDiscountRule[];
   /** Automatic category-wise discounts by bill slab (Settings → Billing · Automatic Discounts) */
@@ -364,7 +374,11 @@ export type ModeSettings = {
 };
 
 /** Shop settings as seen from one dashboard: shared shop details + that mode's settings. */
-export type ScopedSettings = ShopSettings & { mode_settings: ModeSettings };
+export type ScopedSettings = ShopSettings & {
+  mode_settings: ModeSettings;
+  /** This dashboard's offers & free gifts (retail only; none on wholesale) */
+  offers: Offer[];
+};
 
 export type Payment = {
   id: string;

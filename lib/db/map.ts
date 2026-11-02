@@ -20,6 +20,7 @@ import { isMode, type Mode } from "../mode";
 import { normalisePromo } from "../promo";
 import { normaliseTypeDiscounts } from "../type-discounts";
 import { defaultAutoDiscounts, normaliseAutoDiscounts } from "../auto-discounts";
+import type { Offer } from "../offers";
 import { parseProductTypes, parsePurchaseUnits } from "../product-types";
 
 const modeOrNull = (value: unknown): Mode | null => (isMode(value) ? value : null);
@@ -148,6 +149,9 @@ export const mapBillItem = (row: any): BillItem => ({
   auto_category: row.autoCategory || "",
   auto_percent: toNum(row.autoPercent),
   auto_discount: toNum(row.autoDiscount),
+  is_free: Boolean(row.isFree),
+  offer_id: row.offerId ?? null,
+  offer_name: row.offerName || "",
 });
 
 export const mapBill = (row: any, items: any[] = []): Bill => ({
@@ -182,6 +186,7 @@ export const mapBill = (row: any, items: any[] = []): Bill => ({
   returned_amount: toNum(row.returnedAmount),
   auto_discount: toNum(row.autoDiscount),
   auto_slab: row.autoSlab || "",
+  offer_savings: toNum(row.offerSavings),
   shipping_address: row.shippingAddress || "",
   customer_gstin: row.customerGstin || "",
   items: items.map(mapBillItem),
@@ -230,6 +235,8 @@ export const mapModeSettings = (row: any, mode: Mode): ModeSettings => ({
   enforce_moq: Boolean(row?.enforceMoq ?? mode === "wholesale"),
   invoice_terms: row?.invoiceTerms ?? "",
   invoice_promo: normalisePromo(row?.invoicePromo),
+  alert_popup: row?.alertPopup ?? true,
+  alert_sound: row?.alertSound ?? true,
   type_discounts: normaliseTypeDiscounts(row?.typeDiscounts),
   auto_discounts: row?.autoDiscounts ? normaliseAutoDiscounts(row.autoDiscounts) : defaultAutoDiscounts([], false),
   gstin: row?.gstin ?? "",
@@ -311,5 +318,24 @@ export const mapStockMovement = (row: any): StockMovement => ({
   reference: row.reference || "",
   note: row.note || "",
   actor: row.actor || "",
+  created_at: iso(row.createdAt),
+});
+
+export const mapOffer = (row: any): Offer => ({
+  id: row.id,
+  name: row.name,
+  description: row.description || "",
+  type: row.type === "bill_gift" ? "bill_gift" : "buy_get",
+  buy_medicine_id: row.buyMedicineId ?? null,
+  buy_qty: row.buyQty ?? 1,
+  reward_medicine_id: row.rewardMedicineId,
+  reward_qty: row.rewardQty ?? 1,
+  min_bill: toNum(row.minBill),
+  repeatable: Boolean(row.repeatable),
+  max_free_per_bill: row.maxFreePerBill ?? 0,
+  starts_on: row.startsOn || "",
+  ends_on: row.endsOn || "",
+  active: Boolean(row.active),
+  priority: row.priority ?? 0,
   created_at: iso(row.createdAt),
 });

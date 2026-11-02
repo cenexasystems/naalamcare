@@ -31,6 +31,7 @@ import { Reports } from "@/components/pms/Reports";
 import { ExpiryAlert } from "@/components/pms/ExpiryAlert";
 import { SettingsPanel } from "@/components/pms/SettingsPanel";
 import { Toast, ThemeApplier } from "@/components/pms/ui";
+import { LowStockNotice } from "@/components/pms/LowStockNotice";
 
 /* sessionStorage keys. The role key is also what the PWA install banner
    checks; the signed session itself lives in an httpOnly cookie. */
@@ -373,7 +374,7 @@ function Workspace({
             />
           )}
 
-          {screen === "expiry" && <ExpiryAlert rows={batchRows} initialTab={expiryTab} />}
+          {screen === "expiry" && <ExpiryAlert key={expiryTab} rows={batchRows} initialTab={expiryTab} />}
 
           {screen === "settings" && role === "admin" && (
             <SettingsPanel settings={settings} suppliers={suppliers} medicines={medicines} onChanged={notify} />
@@ -384,6 +385,21 @@ function Workspace({
       </div>
 
       {toast && <Toast message={toast.message} tone={toast.tone} />}
+
+      {/* Low-stock notification on every screen (Settings → Notifications). Keyed by dashboard. */}
+      {settings && (
+        <LowStockNotice
+          key={mode}
+          mode={mode}
+          rows={batchRows}
+          popup={settings.mode_settings.alert_popup}
+          sound={settings.mode_settings.alert_sound}
+          onView={() => {
+            setExpiryTab("low");
+            setScreen("expiry");
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -136,9 +136,11 @@ export const Inventory = ({
   // Show the stock/expiry alert once per open of the Stock tab. Dismissing it
   // hides it until the screen is reopened.
   const [alertDismissed, setAlertDismissed] = useState(false);
+  // Settings → Notifications can switch the pop-up (and its sound) off for this dashboard.
   const showStockAlert =
     tab === "stock" &&
     !alertDismissed &&
+    settings?.mode_settings.alert_popup !== false &&
     (summary.low > 0 || summary.out > 0 || summary.expired > 0 || summary.soon > 0);
 
 
@@ -216,6 +218,7 @@ export const Inventory = ({
               the Stock tab opens and something needs restocking. */}
           {showStockAlert && (
             <StockAlarmModal
+              sound={settings?.mode_settings.alert_sound !== false}
               low={summary.low}
               out={summary.out}
               expired={summary.expired}
@@ -953,6 +956,7 @@ const EditMedicineModal = ({
 /* ---------------------------- low stock alarm ---------------------------- */
 
 const StockAlarmModal = ({
+  sound,
   low,
   out,
   expired,
@@ -963,6 +967,8 @@ const StockAlarmModal = ({
   onViewExpired,
   onViewSoon,
 }: {
+  /** Ring the alarm (Settings → Notifications) */
+  sound: boolean;
   low: number;
   out: number;
   expired: number;
@@ -977,10 +983,11 @@ const StockAlarmModal = ({
   // unlocked on the first tap in the app (see lib/alarm.ts) so this works on iOS
   // Safari too, where audio can't start from a background effect.
   React.useEffect(() => {
+    if (!sound) return;
     playAlarmBeep();
     const timer = window.setInterval(playAlarmBeep, 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [sound]);
 
   // A one-line summary of everything that needs attention.
   const parts: string[] = [];
@@ -1032,7 +1039,7 @@ const StockAlarmModal = ({
             </button>
           )}
           <Button variant="ghost" className="w-full justify-center" onClick={onClose}>
-            <X className="h-4 w-4" /> Close &amp; silence alarm
+            <X className="h-4 w-4" /> {sound ? "Close & silence alarm" : "Close"}
           </Button>
         </div>
       </div>

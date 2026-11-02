@@ -13,6 +13,8 @@ import {
   validateAutoDiscounts,
   type AutoDiscountConfig,
 } from "./auto-discounts";
+import { checkOffer, planOffers, type Offer, type OfferType } from "./offers";
+import { mapOffer } from "./db/map";
 import { normalisePromo } from "./promo";
 import { parseProductTypes, parsePurchaseUnits } from "./product-types";
 import {
@@ -1089,6 +1091,19 @@ export async function categoryUsage(): Promise<ActionResult<Record<string, numbe
 }
 
 /** Settings → Invoice Offer Pop-up: what customers see when they open their invoice link. */
+/** Settings → Notifications: stock-alert pop-ups and alarm sound, per dashboard. */
+export async function saveAlertSettings(mode: Mode, payload: { popup: boolean; sound: boolean }): Promise<ActionResult<null>> {
+  return run(async () => {
+    await requireMode(mode, { admin: true });
+    const values = { alertPopup: Boolean(payload?.popup), alertSound: Boolean(payload?.sound) };
+    await db
+      .insert(schema.modeSettings)
+      .values({ mode, ...values })
+      .onConflictDoUpdate({ target: schema.modeSettings.mode, set: values });
+    return null;
+  });
+}
+
 export async function saveInvoicePromo(mode: Mode, payload: unknown): Promise<ActionResult<null>> {
   return run(async () => {
     await requireMode(mode, { admin: true });
@@ -1295,6 +1310,68 @@ export async function submitBill(
         }
       }
 
+      /* ------------------------ offers & free gifts (retail) ----------------------- */
+      // Worked out here from the saved offers — never from the counter. Free items come off stock
+      // like any sale (earliest expiry first) and are only given when in stock; nothing is substituted.
+      const freeLines: {
+        batch: typeof schema.batches.$inferSelect;
+        med: typeof schema.medicines.$inferSelect;
+        qty: number;
+        mrpPerUnit: number;
+        costPerUnit: number;
+        offer: Offer;
+      }[] = [];
+      if (mode === "retail") {
+        const offerRows = await tx.select().from(schema.offers).where(and(eq(schema.offers.mode, mode), eq(schema.offers.active, true)));
+        if (offerRows.length) {
+          const offerList = offerRows.map(mapOffer);
+          const rewardIds = [...new Set(offerList.map((o) => o.reward_medicine_id))];
+          const stockByMed = new Map<string, (typeof schema.batches.$inferSelect)[]>();
+          for (const id of rewardIds) {
+            const rows = await tx
+              .select()
+              .from(schema.batches)
+              .where(and(eq(schema.batches.medicineId, id), eq(schema.batches.mode, mode), sql`${schema.batches.stockQty} > 0`))
+              .orderBy(asc(schema.batches.expDate));
+            stockByMed.set(id, rows.filter((b) => !isExpired(b.expDate)));
+          }
+          const packOf = (id: string) => stockByMed.get(id)?.[0]?.packSize || 1;
+          const plan = planOffers(
+            offerList,
+            billDate,
+            priced.map((p) => ({ medicine_id: p.med.id, qty: p.qty, pack_size: p.batch.packSize || 1 })),
+            round2(priced.reduce((s, p) => s + p.perUnit * p.qty, 0)),
+            (id) => (stockByMed.get(id) ?? []).reduce((s, b) => s + b.stockQty, 0) / packOf(id),
+          );
+          for (const reward of plan) {
+            let units = reward.packs * packOf(reward.medicine_id);
+            for (const b of stockByMed.get(reward.medicine_id) ?? []) {
+              if (units <= 0) break;
+              const take = Math.min(units, b.stockQty);
+              if (take <= 0) continue;
+              const updated = await tx
+                .update(schema.batches)
+                .set({ stockQty: sql`${schema.batches.stockQty} - ${take}` })
+                .where(and(eq(schema.batches.id, b.id), gte(schema.batches.stockQty, take)))
+                .returning();
+              if (!updated.length) fail(`The free item from batch ${b.batchNo} just went out of stock — try again.`);
+              b.stockQty -= take;
+              const med = await tx.select().from(schema.medicines).where(eq(schema.medicines.id, b.medicineId)).limit(1);
+              freeLines.push({
+                batch: updated[0],
+                med: med[0],
+                qty: take,
+                mrpPerUnit: round2(num(b.mrp) / (b.packSize || 1)),
+                costPerUnit: round2(num(b.purchaseRate) / (b.packSize || 1)),
+                offer: reward.offer,
+              });
+              units -= take;
+            }
+          }
+        }
+      }
+      const offerSavings = round2(freeLines.reduce((s, f) => s + f.mrpPerUnit * f.qty, 0));
+
       /* ------------------------------- totals ------------------------------- */
       const totals = calcBillTotals(
         priced.map((p) => ({ qty: p.qty, mrp_per_unit: p.mrpPerUnit, per_unit_price: p.perUnit, gst_percent: num(p.batch.gstPercent) })),
@@ -1376,6 +1453,7 @@ export async function submitBill(
         discount: round2(totals.discount + auto.total + offerDiscount + extraDiscount).toString(),
         autoDiscount: auto.total.toString(),
         autoSlab: auto.total > 0 && auto.slab ? `${auto.slab.name} (${slabRange(auto.slab)})` : "",
+        offerSavings: offerSavings.toString(),
         taxableAmount: taxableAmount.toString(),
         gstAmount: gstAmount.toString(),
         gstPercent: gstPercent.toString(),
@@ -1429,6 +1507,50 @@ export async function submitBill(
           qtyChange: -p.qty,
           balanceAfter: p.batch.stockQty,
           reference: billId,
+          actor,
+        });
+      }
+
+      // Free items from offers: their own ₹0 lines (marked free, with the offer's name), after the paid ones.
+      for (const f of freeLines) {
+        const lineMrp = round2(f.mrpPerUnit * f.qty);
+        await tx.insert(schema.billItems).values({
+          billId,
+          medicineId: f.med.id,
+          batchId: f.batch.id,
+          genericName: f.med.genericName,
+          brandName: f.batch.brandName || f.med.brandName,
+          manufacturer: f.batch.manufacturer || f.med.manufacturer,
+          schedule: f.med.schedule,
+          productType: f.med.productType,
+          hsnCode: f.med.hsnCode,
+          batchNo: f.batch.batchNo,
+          mfgDate: f.batch.mfgDate,
+          expDate: f.batch.expDate,
+          box: f.batch.box,
+          purchaseUnitType: f.batch.purchaseUnitType,
+          packSize: f.batch.packSize,
+          qty: f.qty,
+          mrpPerUnit: f.mrpPerUnit.toString(),
+          perUnitPrice: "0",
+          lineMrp: lineMrp.toString(),
+          lineAmount: "0",
+          lineDiscount: lineMrp.toString(),
+          gstPercent: f.batch.gstPercent,
+          costPerUnit: f.costPerUnit.toString(),
+          isFree: true,
+          offerId: f.offer.id,
+          offerName: f.offer.name,
+        });
+        await logMovement(tx, {
+          mode,
+          batchId: f.batch.id,
+          medicineId: f.med.id,
+          type: "SALE",
+          qtyChange: -f.qty,
+          balanceAfter: f.batch.stockQty,
+          reference: billId,
+          note: `Free — ${f.offer.name}`,
           actor,
         });
       }
@@ -1885,5 +2007,95 @@ export async function classifyLegacyRecords(
         : 0;
       return { batches: batchCount, bills, customers, suppliers };
     });
+  });
+}
+
+/* ==========================================================================
+   Offers & free gifts (admin; retail only) — Settings → Offers
+   ========================================================================== */
+
+/** Create or update an offer. Bills already made keep the offer name they were given. */
+export async function saveOffer(payload: any): Promise<ActionResult<string>> {
+  return run(async () => {
+    await requireMode("retail", { admin: true });
+    const type: OfferType = payload?.type === "bill_gift" ? "bill_gift" : "buy_get";
+    const offer: Offer = {
+      id: str(payload?.id),
+      name: str(payload?.name).slice(0, 80),
+      description: str(payload?.description).slice(0, 300),
+      type,
+      buy_medicine_id: type === "buy_get" ? str(payload?.buy_medicine_id) || null : null,
+      buy_qty: Number(payload?.buy_qty),
+      reward_medicine_id: str(payload?.reward_medicine_id),
+      reward_qty: Number(payload?.reward_qty),
+      min_bill: type === "bill_gift" ? round2(num(payload?.min_bill)) : 0,
+      repeatable: Boolean(payload?.repeatable),
+      max_free_per_bill: Number(payload?.max_free_per_bill || 0),
+      starts_on: isIsoDate(payload?.starts_on) ? payload.starts_on : "",
+      ends_on: isIsoDate(payload?.ends_on) ? payload.ends_on : "",
+      active: payload?.active !== false,
+      priority: Math.trunc(num(payload?.priority)),
+      created_at: "",
+    };
+    if (type === "bill_gift") offer.buy_qty = 1;
+    const errors = checkOffer(offer);
+    if (errors.length) fail(errors.join(" "));
+    const ids = [offer.reward_medicine_id, ...(offer.buy_medicine_id ? [offer.buy_medicine_id] : [])];
+    const found = await db.select({ id: schema.medicines.id }).from(schema.medicines).where(inArray(schema.medicines.id, ids));
+    if (found.length !== new Set(ids).size) fail("Pick the products from the catalogue.");
+
+    const values = {
+      mode: "retail",
+      name: offer.name,
+      description: offer.description,
+      type: offer.type,
+      buyMedicineId: offer.buy_medicine_id,
+      buyQty: offer.buy_qty,
+      rewardMedicineId: offer.reward_medicine_id,
+      rewardQty: offer.reward_qty,
+      minBill: String(offer.min_bill),
+      repeatable: offer.repeatable,
+      maxFreePerBill: offer.max_free_per_bill,
+      startsOn: offer.starts_on,
+      endsOn: offer.ends_on,
+      active: offer.active,
+      priority: offer.priority,
+    };
+    if (offer.id && !isNewId(offer.id)) {
+      const res = await db.update(schema.offers).set(values).where(eq(schema.offers.id, offer.id)).returning({ id: schema.offers.id });
+      if (!res.length) fail("That offer no longer exists.");
+      return offer.id;
+    }
+    const res = await db.insert(schema.offers).values(values).returning({ id: schema.offers.id });
+    return res[0].id;
+  });
+}
+
+export async function deleteOffer(id: string): Promise<ActionResult<null>> {
+  return run(async () => {
+    await requireMode("retail", { admin: true });
+    const res = await db.delete(schema.offers).where(eq(schema.offers.id, str(id))).returning({ id: schema.offers.id });
+    if (!res.length) fail("That offer no longer exists.");
+    return null;
+  });
+}
+
+export type OfferUsage = { offer_id: string; bills: number; free_units: number; savings: number };
+
+/** How often each offer was used, from the bills themselves (net of returned free items). */
+export async function offerUsage(): Promise<ActionResult<OfferUsage[]>> {
+  return run(async () => {
+    await requireMode("retail", { admin: true });
+    const rows = await db
+      .select({
+        offerId: schema.billItems.offerId,
+        bills: sql<number>`count(distinct ${schema.billItems.billId})::int`,
+        units: sql<number>`coalesce(sum(${schema.billItems.qty} - ${schema.billItems.returnedQty}), 0)::int`,
+        savings: sql<string>`coalesce(sum(${schema.billItems.lineMrp}), 0)`,
+      })
+      .from(schema.billItems)
+      .where(and(eq(schema.billItems.isFree, true), sql`${schema.billItems.offerId} is not null`))
+      .groupBy(schema.billItems.offerId);
+    return rows.map((r) => ({ offer_id: r.offerId!, bills: r.bills, free_units: r.units, savings: round2(num(r.savings)) }));
   });
 }

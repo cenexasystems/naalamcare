@@ -11,8 +11,9 @@ import {
 import { THEMES, THEME_KEYS, resolveTheme } from "@/lib/format";
 import { deleteSupplier, saveSettings, saveSupplier } from "@/lib/actions";
 import { act, useMode, useModeState } from "./mode-context";
-import { AutoDiscountsCard, InvoicePromoCard, LoginPasscodesCard, PurchaseUnitsCard, ModeSettingsCard, ReconciliationCard, UsersCard } from "./SettingsExtras";
+import { AutoDiscountsCard, InvoicePromoCard, NotificationsCard, LoginPasscodesCard, PurchaseUnitsCard, ModeSettingsCard, ReconciliationCard, UsersCard } from "./SettingsExtras";
 import { downloadBlob } from "@/lib/xlsx";
+import { OffersSettings } from "./OffersSettings";
 import { Button, Card, Field, Modal, PageTitle, TextInput } from "./ui";
 
 export const SettingsPanel = ({
@@ -37,7 +38,7 @@ export const SettingsPanel = ({
   const [addingSupplier, setAddingSupplier] = useState(false);
   /** Retail admins get a Discounts tab (automatic category-wise discounts are retail only). */
   const showTabs = isAdmin && mode === "retail" && !!initialSettings;
-  const [tab, setTab] = useState<"general" | "discounts">("general");
+  const [tab, setTab] = useState<"general" | "discounts" | "offers">("general");
 
   /* Re-sync when the server row changes after a save, otherwise the panel
      keeps showing the pre-save draft. */
@@ -95,6 +96,7 @@ export const SettingsPanel = ({
           {([
             ["general", "General"],
             ["discounts", "Discounts"],
+            ["offers", "Offers"],
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -119,7 +121,12 @@ export const SettingsPanel = ({
         />
       )}
 
-      <div className={showTabs && tab === "discounts" ? "hidden" : ""}>
+      {/* Offers tab: Buy X Get Y and free gifts (retail). */}
+      {showTabs && tab === "offers" && initialSettings && (
+        <OffersSettings offers={initialSettings.offers} medicines={medicines} onChanged={onChanged} />
+      )}
+
+      <div className={showTabs && tab !== "general" ? "hidden" : ""}>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {/* Shop details */}
@@ -415,6 +422,10 @@ export const SettingsPanel = ({
 
       {initialSettings && (
         <ModeSettingsCard key={mode} settings={initialSettings.mode_settings} onChanged={onChanged} />
+      )}
+
+      {isAdmin && initialSettings && (
+        <NotificationsCard key={`notify-${mode}`} settings={initialSettings.mode_settings} onChanged={onChanged} />
       )}
 
       {isAdmin && initialSettings && <PurchaseUnitsCard units={initialSettings.purchase_units} onChanged={onChanged} />}

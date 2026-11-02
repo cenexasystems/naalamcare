@@ -21,7 +21,8 @@ import {
 import type { Batch, Bill, CartLine, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
 import { calcBillOffer, calcBillTotals, calcDiscountPercent, calcIncludedGst, round2 } from "@/lib/calc";
 import { calcAutoDiscounts, slabRange } from "@/lib/auto-discounts";
-import { amount, money, monthShort, sellByOptions, stockBreakdown, unitNoun, todayIso, type SellBy } from "@/lib/format";
+import { amount, expiryState, money, monthShort, sellByOptions, stockBreakdown, unitNoun, todayIso, type SellBy } from "@/lib/format";
+import { offerBadge, planOffers } from "@/lib/offers";
 import { listHeldBills, saveHeldBills } from "@/lib/store";
 import { submitBill } from "@/lib/actions";
 import { Button, Card, Pill, ScheduleBadge, ScreenHeading, Select } from "./ui";
@@ -269,6 +270,52 @@ export const Billing = ({
     const up = autoConfig.slabs.find((s) => s.enabled && s.min > auto.subtotal);
     return up ? { slab: up, shortBy: round2(up.min - auto.subtotal) } : null;
   }, [autoConfig, auto, lines.length]);
+  /* ------------------------- offers & free gifts ------------------------- */
+  // Preview of what the server will add when the bill is saved (same rules, same stock checks).
+  const freeItems = useMemo(() => {
+    const offerList = settings?.offers ?? [];
+    if (!offerList.length || !lines.length) return [];
+    const byId = new Map(medicines.map((m) => [m.id, m]));
+    const live = (id: string) =>
+      (byId.get(id)?.batches ?? [])
+        .filter((b) => b.stock_qty > 0 && expiryState(b.exp_date) !== "EXPIRED")
+        .sort((a, b) => a.exp_date.localeCompare(b.exp_date));
+    const packOf = (id: string) => live(id)[0]?.pack_size || 1;
+    const inCart = (id: string) => lines.filter((l) => l.medicine_id === id).reduce((s, l) => s + l.qty, 0);
+    return planOffers(
+      offerList,
+      billDate,
+      lines.map((l) => ({ medicine_id: l.medicine_id, qty: l.qty, pack_size: l.pack_size })),
+      totals.grandTotal,
+      (id) => (live(id).reduce((s, b) => s + b.stock_qty, 0) - inCart(id)) / packOf(id),
+    ).map((r) => {
+      const med = byId.get(r.medicine_id);
+      const batch = live(r.medicine_id)[0];
+      const units = r.packs * packOf(r.medicine_id);
+      return { ...r, name: med?.generic_name ?? "Free item", units, mrpValue: round2(units * (batch ? batch.mrp / (batch.pack_size || 1) : 0)), unitType: batch?.purchase_unit_type ?? "Piece" };
+    });
+  }, [settings?.offers, medicines, lines, billDate, totals.grandTotal]);
+  const freeValue = round2(freeItems.reduce((s, f) => s + f.mrpValue, 0));
+
+  // Tell the counter when an offer unlocks, or when its free item is out of stock (compared with the
+  // previous render's offers, so each change is announced once).
+  const offerKey = freeItems.map((f) => `${f.offer.id}:${f.packs}/${f.earned}`).join("|");
+  const [announced, setAnnounced] = useState("");
+  if (offerKey !== announced) {
+    const before = announced;
+    setAnnounced(offerKey);
+    const fresh = freeItems.find((f) => f.packs > 0 && !before.includes(`${f.offer.id}:${f.packs}/`));
+    const short = freeItems.find((f) => f.packs < f.earned);
+    if (short)
+      setNotice(`${short.name} (free with "${short.offer.name}") is out of stock — ${short.packs ? "only part of it" : "it"} can be given.`);
+    else if (fresh)
+      setNotice(
+        fresh.offer.reward_medicine_id === fresh.offer.buy_medicine_id
+          ? `Congratulations! ${offerBadge(fresh.offer)} offer unlocked — ${fresh.name} added free.`
+          : `This purchase qualifies for a free gift. ${fresh.name} has been added to the bill.`,
+      );
+  }
+
   const gstAfterAuto = round2(
     lines.reduce((s, l, i) => s + calcIncludedGst(auto?.lines[i]?.net ?? l.per_unit_price * l.qty, l.gst_percent), 0),
   );
@@ -729,11 +776,10 @@ export const Billing = ({
           </div>
 
           <div className="flex-1 overflow-x-auto">
-            <table className="w-full min-w-[560px]">
+            <table className="w-full min-w-[340px]">
               <thead>
                 <tr className="bg-[#fafbfc] text-gray-600">
                   <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold">#</th>
-                  <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold">Category</th>
                   <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold">Product</th>
                   <th className="px-1.5 py-2.5 text-center text-[11px] font-semibold">Box</th>
                   <th className="px-1.5 py-2.5 text-center text-[11px] font-semibold">Quantity</th>
@@ -742,23 +788,32 @@ export const Billing = ({
                     <br />
                     price
                   </th>
-                  <th className="px-1.5 py-2.5 text-right text-[11px] font-semibold">Amount</th>
-                  <th className="px-1.5 py-2.5 text-right text-[11px] font-semibold">Disc</th>
-                  <th className="px-1.5 py-2.5 text-right text-[11px] font-semibold">Net (₹)</th>
-                  <th className="px-1.5 py-2.5" />
+                  <th className="px-1.5 py-2.5 text-right text-[11px] font-semibold leading-tight">
+                    Amount (₹)
+                    <br />
+                    after disc
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#f1f3f5]">
                 {lines.map((line, index) => (
                   <tr key={line.key} className="align-middle">
-                    <td className="px-1.5 py-3 text-[12px] text-gray-500">{index + 1}</td>
-                    <td className="px-1.5 py-3 text-[11.5px] font-medium text-gray-700">{auto?.lines[index]?.category || line.product_type || "—"}</td>
+                    <td className="px-1.5 py-3 text-center text-[12px] text-gray-500">
+                      {index + 1}
+                      <button
+                        onClick={() => removeLine(line.key)}
+                        aria-label={`Remove ${line.generic_name}`}
+                        className="mt-1 block cursor-pointer text-red-500 transition hover:text-red-700"
+                      >
+                        <Trash2 className="h-[15px] w-[15px]" />
+                      </button>
+                    </td>
                     <td className="px-1.5 py-3">
                       <p className="text-[12.5px] font-semibold leading-tight text-gray-900">
                         {line.generic_name}
                       </p>
                       <p className="text-[11px] text-gray-500">
-                        {line.brand_name} · {line.qty} {unitNoun(line.purchase_unit_type, line.qty)}
+                        <span className="font-semibold text-gray-700">{auto?.lines[index]?.category || line.product_type || "—"}</span> · {line.brand_name} · {line.qty} {unitNoun(line.purchase_unit_type, line.qty)}
                         {line.pack_size > 1 && line.qty >= line.pack_size
                           ? ` (${stockBreakdown({ ...line, strips_per_box: 0, stock_qty: line.qty })})`
                           : ""}
@@ -780,37 +835,43 @@ export const Billing = ({
                     <td className="px-1.5 py-3 text-right text-[12.5px] font-semibold text-gray-800">
                       {amount(line.per_unit_price)}
                     </td>
-                    <td className="px-1.5 py-3 text-right text-[12.5px] font-semibold text-gray-800">
-                      {amount(round2(line.per_unit_price * line.qty))}
-                    </td>
-                    <td className="px-1.5 py-3 text-right text-[11.5px] font-semibold text-[var(--c-deep)]">
-                      {auto?.lines[index]?.discount ? (
-                        <>
-                          {auto.lines[index].percent}%
-                          <br />
-                          −{amount(auto.lines[index].discount)}
-                        </>
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      )}
-                    </td>
-                    <td className="px-1.5 py-3 text-right text-[12.5px] font-bold text-gray-900">
-                      {amount(auto?.lines[index]?.net ?? round2(line.per_unit_price * line.qty))}
-                    </td>
                     <td className="px-1.5 py-3 text-right">
-                      <button
-                        onClick={() => removeLine(line.key)}
-                        aria-label="Remove"
-                        className="cursor-pointer text-red-500 transition hover:text-red-700"
-                      >
-                        <Trash2 className="h-[15px] w-[15px]" />
-                      </button>
+                      <p className="text-[12.5px] font-bold text-gray-900">
+                        {amount(auto?.lines[index]?.net ?? round2(line.per_unit_price * line.qty))}
+                      </p>
+                      {auto?.lines[index]?.discount ? (
+                        <p className="whitespace-nowrap text-[10.5px] font-semibold text-[var(--c-deep)]">
+                          <span className="text-gray-400 line-through">{amount(round2(line.per_unit_price * line.qty))}</span> −{auto.lines[index].percent}%
+                        </p>
+                      ) : null}
                     </td>
                   </tr>
                 ))}
+                {freeItems
+                  .filter((f) => f.packs > 0)
+                  .map((f) => (
+                    <tr key={`free-${f.offer.id}`} className="bg-[#f2fbf5] align-middle">
+                      <td className="px-1.5 py-3 text-[12px] text-gray-500">★</td>
+                      <td className="px-1.5 py-3" colSpan={2}>
+                        <p className="text-[12.5px] font-semibold leading-tight text-gray-900">
+                          <span className="mr-1 rounded bg-[#16a34a] px-1.5 py-0.5 text-[10px] font-extrabold text-white">FREE</span>
+                          {f.name}
+                        </p>
+                        <p className="text-[11px] text-[#15803d]">
+                          {offerBadge(f.offer)} · {f.offer.name}
+                        </p>
+                      </td>
+                      <td className="px-1.5 py-3 text-center text-[12.5px] font-bold">{f.units}</td>
+                      <td className="px-1.5 py-3" />
+                      <td className="px-1.5 py-3 text-right">
+                        <p className="text-[12.5px] font-bold text-[#15803d]">0.00</p>
+                        <p className="text-[10.5px] text-gray-400 line-through">{amount(f.mrpValue)}</p>
+                      </td>
+                    </tr>
+                  ))}
                 {!lines.length && (
                   <tr>
-                    <td colSpan={10} className="px-4 py-14 text-center text-[13px] text-gray-400">
+                    <td colSpan={6} className="px-4 py-14 text-center text-[13px] text-gray-400">
                       No items yet — search a medicine and press ADD TO BILL (F5)
                     </td>
                   </tr>
@@ -979,6 +1040,18 @@ export const Billing = ({
             <p className="mt-3 rounded-lg bg-[var(--c-mint)] px-3 py-2 text-[11.5px] font-medium text-[var(--c-deep)]">
               Add {money(billOffer.next.short_by)} more to get {billOffer.next.percent}% off this bill.
             </p>
+          )}
+
+          {freeItems.some((f) => f.packs > 0) && (
+            <div className="mt-3 rounded-lg border border-[#bbf7d0] bg-[#f2fbf5] px-3 py-2 text-[12.5px]">
+              <p className="mb-1 font-bold text-[#15803d]">Free items (offers)</p>
+              {freeItems
+                .filter((f) => f.packs > 0)
+                .map((f) => (
+                  <Row key={f.offer.id} label={`${f.name} × ${f.units} — ${offerBadge(f.offer)}`} value="FREE" tone="green" />
+                ))}
+              <p className="mt-1 text-[11.5px] text-gray-600">Worth {money(freeValue)} at MRP · not charged</p>
+            </div>
           )}
 
           <div className="mt-4 flex items-center justify-between border-t border-[#eef1f3] pt-4">
