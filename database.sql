@@ -552,3 +552,24 @@ ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "offer_savings" numeric(12, 2) DEFA
 
 ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "alert_popup" boolean DEFAULT true NOT NULL;
 ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "alert_sound" boolean DEFAULT true NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 20. Offers: categories, discounted rewards, price offers, limits, counter-
+--     accepted offers, stacking with the automatic discount; offer discounts
+--     on bill lines.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "buy_category" text DEFAULT '' NOT NULL;
+ALTER TABLE "offers" ALTER COLUMN "reward_medicine_id" DROP NOT NULL;
+ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "reward_mode" text DEFAULT 'free' NOT NULL;
+ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "reward_value" numeric(12, 2) DEFAULT '0' NOT NULL;
+ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "off_mode" text DEFAULT 'percent' NOT NULL;
+ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "off_value" numeric(12, 2) DEFAULT '0' NOT NULL;
+ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "max_per_customer" integer DEFAULT 0 NOT NULL;
+ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "max_total" integer DEFAULT 0 NOT NULL;
+ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "auto_apply" boolean DEFAULT true NOT NULL;
+ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "stack_auto" boolean DEFAULT false NOT NULL;
+ALTER TABLE "offers" DROP CONSTRAINT IF EXISTS "offers_type_check";
+ALTER TABLE "offers" ADD CONSTRAINT "offers_type_check" CHECK ("type" IN ('buy_get', 'bill_gift', 'price_off'));
+ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "promo_discount" numeric(12, 2) DEFAULT '0' NOT NULL;
+ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "promo_discount" numeric(12, 2) DEFAULT '0' NOT NULL;

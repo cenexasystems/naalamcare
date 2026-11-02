@@ -191,10 +191,13 @@ export type AutoResult = {
   total: number;
 };
 
-/** Discount every line of a bill. `amount` is the line's billed amount (price × qty) before this discount. */
+/**
+ * Discount every line of a bill. `amount` is the line's billed amount (price × qty) before this discount.
+ * `no_discount` lines (already discounted by an offer that doesn't stack) still count towards the slab.
+ */
 export const calcAutoDiscounts = (
   config: AutoDiscountConfig,
-  lines: { product_type?: string; amount: number }[],
+  lines: { product_type?: string; amount: number; no_discount?: boolean }[],
 ): AutoResult => {
   const subtotal = r2(lines.reduce((s, l) => s + n(l.amount), 0));
   const slab = config.enabled ? slabFor(config, subtotal) : null;
@@ -202,7 +205,7 @@ export const calcAutoDiscounts = (
   const out: AutoLine[] = lines.map((l) => {
     const category = categoryFor(config, l.product_type);
     const amount = n(l.amount);
-    const percent = slab && slab.enabled && !inactive ? n(slab.rates[category]) : 0;
+    const percent = slab && slab.enabled && !inactive && !l.no_discount ? n(slab.rates[category]) : 0;
     const discount = r2((amount * percent) / 100);
     return { category, percent, discount, net: r2(amount - discount) };
   });
@@ -235,16 +238,16 @@ export const slabRange = (s: Pick<DiscountSlab, "min" | "max">): string =>
  */
 export const billLineNets = (bill: {
   grand_total: number;
-  items: { line_amount: number; auto_discount?: number }[];
+  items: { line_amount: number; auto_discount?: number; promo_discount?: number }[];
 }): number[] => {
-  const afterAuto = bill.items.map((i) => n(i.line_amount) - n(i.auto_discount));
+  const afterAuto = bill.items.map((i) => n(i.line_amount) - n(i.promo_discount) - n(i.auto_discount));
   const sum = afterAuto.reduce((s, x) => s + x, 0);
   const factor = sum > 0 ? n(bill.grand_total) / sum : 1;
   return afterAuto.map((x) => x * factor);
 };
 
 /** What one unit of each line actually cost the customer (see billLineNets). */
-export const unitPaidOf = <I extends { id: string; qty: number; line_amount: number; auto_discount?: number }>(bill: {
+export const unitPaidOf = <I extends { id: string; qty: number; line_amount: number; auto_discount?: number; promo_discount?: number }>(bill: {
   grand_total: number;
   items: I[];
 }): ((item: I) => number) => {

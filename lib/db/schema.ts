@@ -180,6 +180,8 @@ export const bills = pgTable(
     autoSlab: text("auto_slab").notNull().default(""),
     /** MRP value of the free items given by offers on this bill */
     offerSavings: numeric("offer_savings", { precision: 12, scale: 2 }).notNull().default("0"),
+    /** Offer discounts taken off paid lines on this bill */
+    promoDiscount: numeric("promo_discount", { precision: 12, scale: 2 }).notNull().default("0"),
     shippingAddress: text("shipping_address").notNull().default(""),
     customerGstin: text("customer_gstin").notNull().default(""),
     /** Idempotency key from the billing screen — a double-submit returns the first bill. */
@@ -230,6 +232,8 @@ export const billItems = pgTable(
     autoCategory: text("auto_category").notNull().default(""),
     autoPercent: numeric("auto_percent", { precision: 5, scale: 2 }).notNull().default("0"),
     autoDiscount: numeric("auto_discount", { precision: 12, scale: 2 }).notNull().default("0"),
+    /** Offer discount taken off this line (price offers, discounted rewards) */
+    promoDiscount: numeric("promo_discount", { precision: 12, scale: 2 }).notNull().default("0"),
     /** Free item given by an offer (₹0 line), and the offer — kept even if the offer is later edited or deleted */
     isFree: boolean("is_free").notNull().default(false),
     offerId: uuid("offer_id"),
@@ -460,18 +464,33 @@ export const offers = pgTable("offers", {
   mode: text("mode").notNull().default("retail"),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
-  /** "buy_get" | "bill_gift" */
+  /** "buy_get" | "bill_gift" | "price_off" */
   type: text("type").notNull(),
   buyMedicineId: uuid("buy_medicine_id"),
+  /** Any product of this Product Type qualifies ("" = use buy_medicine_id) */
+  buyCategory: text("buy_category").notNull().default(""),
   buyQty: integer("buy_qty").notNull().default(1),
-  rewardMedicineId: uuid("reward_medicine_id").notNull(),
+  rewardMedicineId: uuid("reward_medicine_id"),
   rewardQty: integer("reward_qty").notNull().default(1),
+  /** "free" | "percent" | "price" and its value (% off, or ₹ per pack) */
+  rewardMode: text("reward_mode").notNull().default("free"),
+  rewardValue: numeric("reward_value", { precision: 12, scale: 2 }).notNull().default("0"),
+  /** price_off: "percent" | "amount" | "price" and its value */
+  offMode: text("off_mode").notNull().default("percent"),
+  offValue: numeric("off_value", { precision: 12, scale: 2 }).notNull().default("0"),
   minBill: numeric("min_bill", { precision: 12, scale: 2 }).notNull().default("0"),
   repeatable: boolean("repeatable").notNull().default(true),
   maxFreePerBill: integer("max_free_per_bill").notNull().default(0),
+  /** 0 = no limit */
+  maxPerCustomer: integer("max_per_customer").notNull().default(0),
+  maxTotal: integer("max_total").notNull().default(0),
   startsOn: text("starts_on").notNull().default(""),
   endsOn: text("ends_on").notNull().default(""),
   active: boolean("active").notNull().default(true),
+  /** Off = the counter must accept it on the bill */
+  autoApply: boolean("auto_apply").notNull().default(true),
+  /** Let the automatic category discount also apply to lines this offer discounts */
+  stackAuto: boolean("stack_auto").notNull().default(false),
   priority: integer("priority").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

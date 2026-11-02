@@ -123,7 +123,7 @@ export const SettingsPanel = ({
 
       {/* Offers tab: Buy X Get Y and free gifts (retail). */}
       {showTabs && tab === "offers" && initialSettings && (
-        <OffersSettings offers={initialSettings.offers} medicines={medicines} onChanged={onChanged} />
+        <OffersSettings offers={initialSettings.offers} medicines={medicines} categories={initialSettings.product_types} onChanged={onChanged} />
       )}
 
       <div className={showTabs && tab !== "general" ? "hidden" : ""}>

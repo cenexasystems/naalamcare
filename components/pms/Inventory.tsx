@@ -30,6 +30,7 @@ import { INVENTORY_SHEET } from "./exports";
 import { downloadCsv, downloadExcel } from "@/lib/xlsx";
 import { useSettings } from "./data";
 import { DEFAULT_PRODUCT_TYPES, DEFAULT_PURCHASE_UNITS, productTypeOptions } from "@/lib/product-types";
+import { offerBadge, offerStatus, type Offer } from "@/lib/offers";
 import { playAlarmBeep } from "@/lib/alarm";
 import { Button, Card, Field, Modal, PageTitle, Pill, Select, StatTile, TextInput } from "./ui";
 
@@ -949,6 +950,7 @@ const EditMedicineModal = ({
           />
         </Field>
       </div>
+      {!isNew && <ProductPromotions medicine={draft} offers={settings?.offers ?? []} />}
     </Modal>
   );
 };
@@ -1072,6 +1074,46 @@ const pageNumbers = (current: number, total: number): (number | string)[] => {
   if (current <= 3) return [1, 2, 3, "...", total];
   if (current >= total - 2) return [1, "...", total - 2, total - 1, total];
   return [1, "...", current, "...", total];
+};
+
+/* ---------------------- promotions on a product (retail) ---------------------- */
+
+/** Offers this product takes part in — bought, given, or through its category. Managed in Settings → Offers. */
+const ProductPromotions = ({ medicine, offers }: { medicine: Medicine; offers: Offer[] }) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const mine = offers.filter(
+    (o) =>
+      o.buy_medicine_id === medicine.id ||
+      o.reward_medicine_id === medicine.id ||
+      (o.buy_category && o.buy_category.toLowerCase() === (medicine.product_type || "").toLowerCase()),
+  );
+  return (
+    <div className="mt-5 border-t border-[#eef1f3] pt-4">
+      <p className="mb-2 text-[13px] font-bold text-gray-900">Promotions <span className="text-[11.5px] font-medium text-gray-500">· retail · managed in Settings → Offers</span></p>
+      {mine.length ? (
+        <div className="space-y-1.5">
+          {mine.map((o) => {
+            const status = offerStatus(o, today);
+            const role = o.reward_medicine_id === medicine.id && o.buy_medicine_id !== medicine.id ? "given as reward" : o.buy_category ? `via category ${o.buy_category}` : "bought";
+            return (
+              <div key={o.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#e5e7eb] px-3 py-2 text-[12.5px]">
+                <span>
+                  <span className="mr-1.5 rounded bg-[var(--c-mint)] px-1.5 py-0.5 text-[10.5px] font-extrabold text-[var(--c-deep)]">{offerBadge(o)}</span>
+                  <span className="font-semibold text-gray-900">{o.name}</span>
+                  <span className="text-gray-500"> · {role}</span>
+                </span>
+                <span className="text-[11.5px] text-gray-600">
+                  {status.toUpperCase()} · {o.ends_on ? `until ${o.ends_on.split("-").reverse().join("/")}` : "no end date"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-[12px] text-gray-400">No offers on this product.</p>
+      )}
+    </div>
+  );
 };
 
 /* ------------------------- new medicine placeholder ----------------------- */

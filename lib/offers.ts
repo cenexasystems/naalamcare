@@ -1,138 +1,242 @@
 /* ==========================================================================
-   Offers & free gifts (retail) — Settings → Offers
+   Offers & promotions (retail) — Settings → Offers
 
-   Two kinds of offer, both giving free items as separate ₹0 lines:
-     • "buy_get"   Buy X packs of a product, get Y packs free — of the same
-                   product (Buy 1 Get 1, Buy 2 Get 1) or of another product
-                   (a free gift with that medicine).
+   Three kinds of offer:
+     • "buy_get"   Buy X packs of a product — or of any product in a category —
+                   and get Y packs of a reward product FREE, at a % off, or at a
+                   promotional price per pack. Same product = Buy 1 Get 1 style;
+                   a different product = a gift with purchase.
      • "bill_gift" A bill of ₹N or more gets Y packs of a gift product.
+     • "price_off" Buy at least X packs of a product / category and those lines
+                   get a % off, ₹ off per pack, or a promotional price per pack.
 
-   Quantities are in packs — a strip, bottle or piece, as the product is
-   bought — so "Buy 1 Get 1" on a strip of 10 means 10 tablets bought, 10 free.
-   Loose tablets that don't make a whole strip don't count. Free items never
-   count towards qualifying for an offer.
+   Quantities are whole packs (strip / bottle / piece). Loose units that don't
+   make a pack don't count, and reward items never count towards qualifying.
 
-   Conflicts: for one product only the highest-priority offer applies; of the
-   bill-amount gifts, only the highest threshold the bill reaches applies.
-   A free item is only given when it is in stock — another product is never
-   substituted.
+   Conflicts: offers are tried highest priority first, and each bill line can
+   be claimed by only one buy_get / price_off offer — two offers never act on
+   the same quantity. Of the bill-amount gifts, only the highest threshold the
+   bill reaches applies.
 
-   Pure functions, shared by the billing screen (preview) and the server
-   (what is actually given), so the two always agree.
+   Rewards are only given when in stock; nothing is substituted. Offers with
+   "apply automatically" off are only applied when the counter accepts them.
+   Limits per customer / in total are checked by the server from saved bills.
+
+   Pure functions, shared by the billing screen (preview) and the server (what
+   is actually charged and given), so the two always agree.
    ========================================================================== */
 
-export type OfferType = "buy_get" | "bill_gift";
+export type OfferType = "buy_get" | "bill_gift" | "price_off";
+/** How a reward is priced: free, a % off its selling price, or a fixed price per pack */
+export type RewardMode = "free" | "percent" | "price";
+/** How a price_off offer changes a line: % off, ₹ off per pack, or a fixed price per pack */
+export type OffMode = "percent" | "amount" | "price";
 
 export type Offer = {
   id: string;
   name: string;
   description: string;
   type: OfferType;
-  /** buy_get: the product that must be bought */
+  /** buy_get / price_off: the product bought (or null when a category is used) */
   buy_medicine_id: string | null;
-  /** buy_get: packs to buy for one reward */
+  /** buy_get / price_off: any product of this Product Type qualifies ("" = use the product) */
+  buy_category: string;
+  /** Packs to buy for one reward (buy_get) / at least (price_off) */
   buy_qty: number;
-  /** The free product (may be the same as the bought one) */
-  reward_medicine_id: string;
-  /** Packs given free per reward */
+  /** buy_get / bill_gift: the reward product */
+  reward_medicine_id: string | null;
+  /** Packs given per reward */
   reward_qty: number;
+  reward_mode: RewardMode;
+  /** % off (percent) or ₹ per pack (price) */
+  reward_value: number;
+  off_mode: OffMode;
+  /** % off, ₹ off per pack, or the promotional price per pack */
+  off_value: number;
   /** bill_gift: bill amount (before automatic discounts) needed */
   min_bill: number;
-  /** buy_get: give the reward again for every further X packs (Buy 2 → 2 free) */
+  /** buy_get: give again for every further X packs */
   repeatable: boolean;
-  /** Most free packs on one bill (0 = no limit) */
+  /** Most reward packs on one bill (0 = no limit) */
   max_free_per_bill: number;
+  /** Times one customer can get it (0 = no limit) */
+  max_per_customer: number;
+  /** Times it can be used in all (0 = no limit) */
+  max_total: number;
   /** yyyy-mm-dd, inclusive; "" = no limit */
   starts_on: string;
   ends_on: string;
   active: boolean;
-  /** Higher wins when offers compete for the same product */
+  /** Off = the counter must accept the offer on the bill */
+  auto_apply: boolean;
+  /** May the automatic category discount also apply to lines this offer discounts? (never on free items) */
+  stack_auto: boolean;
+  /** Higher is tried first */
   priority: number;
   created_at: string;
 };
 
 export type OfferStatus = "active" | "scheduled" | "expired" | "off";
 
-export const offerStatus = (o: Offer, date: string): OfferStatus => {
+export const offerStatus = (o: Pick<Offer, "active" | "starts_on" | "ends_on">, date: string): OfferStatus => {
   if (!o.active) return "off";
   if (o.starts_on && date < o.starts_on) return "scheduled";
   if (o.ends_on && date > o.ends_on) return "expired";
   return "active";
 };
 
-/** Badge text, e.g. "BUY 1 GET 1", "BUY 2 GET 1", "FREE GIFT". */
-export const offerBadge = (o: Pick<Offer, "type" | "buy_medicine_id" | "reward_medicine_id" | "buy_qty" | "reward_qty">): string =>
-  o.type === "bill_gift" || o.buy_medicine_id !== o.reward_medicine_id ? "FREE GIFT" : `BUY ${o.buy_qty} GET ${o.reward_qty}`;
+/** Badge text: "BUY 1 GET 1", "BUY 2 GET 1 AT 50% OFF", "FREE GIFT", "SPECIAL OFFER". */
+export const offerBadge = (o: Pick<Offer, "type" | "buy_medicine_id" | "buy_category" | "reward_medicine_id" | "buy_qty" | "reward_qty" | "reward_mode" | "reward_value">): string => {
+  if (o.type === "price_off") return "SPECIAL OFFER";
+  if (o.type === "bill_gift") return "FREE GIFT";
+  const same = !o.buy_category && o.buy_medicine_id === o.reward_medicine_id;
+  if (o.reward_mode === "percent") return `BUY ${o.buy_qty} GET ${o.reward_qty} AT ${o.reward_value}% OFF`;
+  if (o.reward_mode === "price") return `BUY ${o.buy_qty} GET ${o.reward_qty} AT ₹${o.reward_value}`;
+  return same ? `BUY ${o.buy_qty} GET ${o.reward_qty}` : "FREE GIFT";
+};
 
-export type PaidLine = { medicine_id: string; qty: number; pack_size: number };
+const r2 = (x: number) => Math.round((x + Number.EPSILON) * 100) / 100;
+
+export type PaidLine = { medicine_id: string; product_type?: string; qty: number; pack_size: number; amount: number };
 
 export type RewardPlan = {
   offer: Offer;
   medicine_id: string;
-  /** Packs the bill earned */
+  /** Packs the bill earned (after the per-bill cap) */
   earned: number;
   /** Packs actually given (limited by stock) */
   packs: number;
 };
 
+export type LineDiscount = { index: number; offer: Offer; amount: number };
+
+export type OfferPlan = {
+  rewards: RewardPlan[];
+  /** price_off discounts on paid lines */
+  lineDiscounts: LineDiscount[];
+  /** Paid lines claimed by an offer (index → offer), so other offers / stacking rules know */
+  claimed: Map<number, Offer>;
+  /** Offers that need the counter's OK and that this bill qualifies for */
+  available: Offer[];
+};
+
+/** Price of one reward unit, from the reward batch's selling price per unit. */
+export const rewardUnitPrice = (o: Pick<Offer, "reward_mode" | "reward_value">, sellingPerUnit: number, packSize: number): number => {
+  if (o.reward_mode === "percent") return r2(sellingPerUnit * (1 - Math.min(100, Math.max(0, o.reward_value)) / 100));
+  if (o.reward_mode === "price") return r2(Math.min(sellingPerUnit, Math.max(0, o.reward_value) / Math.max(1, packSize)));
+  return 0;
+};
+
+/** Discount on one paid line from a price_off offer. */
+const priceOffAmount = (o: Offer, line: PaidLine): number => {
+  const packs = line.qty / Math.max(1, line.pack_size);
+  const amount = Math.max(0, line.amount);
+  if (o.off_mode === "percent") return r2((amount * Math.min(100, Math.max(0, o.off_value))) / 100);
+  if (o.off_mode === "amount") return Math.min(amount, r2(Math.max(0, o.off_value) * packs));
+  // Promotional price per pack: charge that instead (never more than the normal price).
+  return Math.max(0, r2(amount - Math.max(0, o.off_value) * packs));
+};
+
 /**
- * Which free items a bill gets.
- * `paidSubtotal` is the bill amount before automatic discounts.
- * `stockPacks(medicineId)` is how many whole packs of a product are still free to give after the paid lines.
+ * What offers do to a bill.
+ * `stockPacks(id)` = whole packs of a product still free to give after the paid lines.
+ * `accepted` = ids of "apply automatically: off" offers the counter accepted.
+ * `canUse(offer)` = the per-customer / total limits (the server knows; the screen assumes yes).
  */
 export const planOffers = (
   offers: Offer[],
-  date: string,
-  paid: PaidLine[],
-  paidSubtotal: number,
-  stockPacks: (medicineId: string) => number,
-): RewardPlan[] => {
-  const live = offers.filter((o) => offerStatus(o, date) === "active" && o.reward_qty > 0 && o.reward_medicine_id);
-  const byPriority = (a: Offer, b: Offer) => b.priority - a.priority || b.created_at.localeCompare(a.created_at);
+  ctx: {
+    date: string;
+    paid: PaidLine[];
+    paidSubtotal: number;
+    stockPacks: (medicineId: string) => number;
+    accepted?: Set<string>;
+    canUse?: (offer: Offer) => boolean;
+  },
+): OfferPlan => {
+  const usable = offers
+    .filter((o) => offerStatus(o, ctx.date) === "active" && (ctx.canUse ? ctx.canUse(o) : true))
+    .sort((a, b) => b.priority - a.priority || b.created_at.localeCompare(a.created_at));
+  const accepted = ctx.accepted ?? new Set<string>();
+  const claimed = new Map<number, Offer>();
+  const rewards: { offer: Offer; earned: number; medicine_id: string }[] = [];
+  const lineDiscounts: LineDiscount[] = [];
+  const available: Offer[] = [];
 
-  // Whole packs bought of each product (loose units don't make a pack).
-  const bought = new Map<string, number>();
-  for (const l of paid) bought.set(l.medicine_id, (bought.get(l.medicine_id) ?? 0) + l.qty / Math.max(1, l.pack_size));
+  const matches = (o: Offer, l: PaidLine) =>
+    o.buy_category
+      ? (l.product_type || "").toLowerCase() === o.buy_category.toLowerCase()
+      : Boolean(o.buy_medicine_id) && l.medicine_id === o.buy_medicine_id;
 
-  const chosen: { offer: Offer; earned: number }[] = [];
-  // Buy & get: the best offer for each product bought.
-  const perProduct = new Map<string, Offer>();
-  for (const o of live.filter((x) => x.type === "buy_get" && x.buy_medicine_id && x.buy_qty > 0).sort(byPriority)) {
-    if (perProduct.has(o.buy_medicine_id!)) continue;
-    const packs = Math.floor((bought.get(o.buy_medicine_id!) ?? 0) + 1e-9);
+  for (const o of usable) {
+    if (o.type === "bill_gift") continue;
+    if (o.buy_qty < 1) continue;
+    const idx = ctx.paid.map((l, i) => (!claimed.has(i) && matches(o, l) ? i : -1)).filter((i) => i >= 0);
+    if (!idx.length) continue;
+    const packs = Math.floor(idx.reduce((s, i) => s + ctx.paid[i].qty / Math.max(1, ctx.paid[i].pack_size), 0) + 1e-9);
     const times = Math.floor(packs / o.buy_qty);
     if (times < 1) continue;
-    perProduct.set(o.buy_medicine_id!, o);
-    chosen.push({ offer: o, earned: (o.repeatable ? times : 1) * o.reward_qty });
+    if (o.type === "buy_get" && (!o.reward_medicine_id || o.reward_qty < 1)) continue;
+    if (!o.auto_apply && !accepted.has(o.id)) {
+      available.push(o);
+      continue;
+    }
+    idx.forEach((i) => claimed.set(i, o));
+    if (o.type === "buy_get") {
+      rewards.push({ offer: o, earned: (o.repeatable ? times : 1) * o.reward_qty, medicine_id: o.reward_medicine_id! });
+    } else {
+      for (const i of idx) {
+        const amount = priceOffAmount(o, ctx.paid[i]);
+        if (amount > 0) lineDiscounts.push({ index: i, offer: o, amount });
+      }
+    }
   }
-  // Bill gift: the highest threshold the bill reaches.
-  const gift = live
-    .filter((x) => x.type === "bill_gift" && paidSubtotal > 0 && paidSubtotal >= x.min_bill)
-    .sort((a, b) => b.min_bill - a.min_bill || byPriority(a, b))[0];
-  if (gift) chosen.push({ offer: gift, earned: gift.reward_qty });
+
+  // Bill-amount gift: the highest threshold reached.
+  const gifts = usable
+    .filter((o) => o.type === "bill_gift" && o.reward_medicine_id && o.reward_qty > 0 && ctx.paidSubtotal > 0 && ctx.paidSubtotal >= o.min_bill)
+    .sort((a, b) => b.min_bill - a.min_bill || b.priority - a.priority);
+  const gift = gifts[0];
+  if (gift) {
+    if (!gift.auto_apply && !accepted.has(gift.id)) available.push(gift);
+    else rewards.push({ offer: gift, earned: gift.reward_qty, medicine_id: gift.reward_medicine_id! });
+  }
 
   const left = new Map<string, number>();
-  return chosen.map(({ offer, earned }) => {
-    const capped = offer.max_free_per_bill > 0 ? Math.min(earned, offer.max_free_per_bill) : earned;
-    const id = offer.reward_medicine_id;
-    const available = left.has(id) ? left.get(id)! : Math.max(0, Math.floor(stockPacks(id)));
-    const packs = Math.min(capped, available);
-    left.set(id, available - packs);
-    return { offer, medicine_id: id, earned: capped, packs };
-  });
+  return {
+    rewards: rewards.map(({ offer, earned, medicine_id }) => {
+      const capped = offer.max_free_per_bill > 0 ? Math.min(earned, offer.max_free_per_bill) : earned;
+      const available = left.has(medicine_id) ? left.get(medicine_id)! : Math.max(0, Math.floor(ctx.stockPacks(medicine_id)));
+      const packs = Math.min(capped, available);
+      left.set(medicine_id, available - packs);
+      return { offer, medicine_id, earned: capped, packs };
+    }),
+    lineDiscounts,
+    claimed,
+    available,
+  };
 };
 
-/** Clean an offer submitted from Settings; returns the problems instead of fixing them. */
+/** Problems with an offer submitted from Settings ([] = valid). */
 export const checkOffer = (o: Offer): string[] => {
   const errors: string[] = [];
   if (!o.name.trim()) errors.push("Give the offer a name.");
-  if (!o.reward_medicine_id) errors.push("Choose the free product.");
-  if (!Number.isInteger(o.reward_qty) || o.reward_qty < 1) errors.push("Free quantity must be 1 or more whole packs.");
-  if (o.type === "buy_get") {
-    if (!o.buy_medicine_id) errors.push("Choose the product the customer buys.");
+  const whole = (n: number) => Number.isInteger(n) && n >= 0;
+  if (o.type !== "bill_gift") {
+    if (!o.buy_medicine_id && !o.buy_category) errors.push("Choose the product or category the customer buys.");
     if (!Number.isInteger(o.buy_qty) || o.buy_qty < 1) errors.push("Buy quantity must be 1 or more whole packs.");
   } else if (!(o.min_bill > 0)) errors.push("Enter the bill amount needed for the gift.");
-  if (!Number.isInteger(o.max_free_per_bill) || o.max_free_per_bill < 0) errors.push("Free items per bill must be 0 (no limit) or more.");
+  if (o.type !== "price_off") {
+    if (!o.reward_medicine_id) errors.push("Choose the reward product.");
+    if (!Number.isInteger(o.reward_qty) || o.reward_qty < 1) errors.push("Reward quantity must be 1 or more whole packs.");
+    if (o.reward_mode === "percent" && !(o.reward_value > 0 && o.reward_value < 100)) errors.push("Reward discount must be between 0% and 100%.");
+    if (o.reward_mode === "price" && !(o.reward_value > 0)) errors.push("Enter the reward's promotional price per pack.");
+  } else {
+    if (o.off_mode === "percent" && !(o.off_value > 0 && o.off_value <= 100)) errors.push("Discount must be between 0% and 100%.");
+    if (o.off_mode !== "percent" && !(o.off_value > 0)) errors.push("Enter the amount for the offer.");
+  }
+  if (!whole(o.max_free_per_bill) || !whole(o.max_per_customer) || !whole(o.max_total))
+    errors.push("Limits must be whole numbers (0 = no limit).");
   if (o.starts_on && o.ends_on && o.ends_on < o.starts_on) errors.push("The end date is before the start date.");
   return errors;
 };

@@ -263,9 +263,9 @@ export default async function InvoicePage({
                   <p className="font-bold uppercase">{item.generic_name}</p>
                   {item.brand_name && <p>{item.brand_name}</p>}
                   {item.schedule && <p className="text-[8.5px]">[{item.schedule}]</p>}
-                  {item.is_free && (
+                  {item.offer_name && (
                     <p className="text-[8.5px] font-bold">
-                      <span className="rounded-sm border border-black px-0.5">FREE</span> {item.offer_name}
+                      <span className="rounded-sm border border-black px-0.5">{item.is_free ? "FREE" : "OFFER"}</span> {item.offer_name}
                     </p>
                   )}
                 </td>

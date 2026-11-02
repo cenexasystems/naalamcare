@@ -22,7 +22,7 @@ import type { Batch, Bill, CartLine, HeldBill, MedicineWithBatches, PaymentMetho
 import { calcBillOffer, calcBillTotals, calcDiscountPercent, calcIncludedGst, round2 } from "@/lib/calc";
 import { calcAutoDiscounts, slabRange } from "@/lib/auto-discounts";
 import { amount, expiryState, money, monthShort, sellByOptions, stockBreakdown, unitNoun, todayIso, type SellBy } from "@/lib/format";
-import { offerBadge, planOffers } from "@/lib/offers";
+import { offerBadge, planOffers, rewardUnitPrice } from "@/lib/offers";
 import { listHeldBills, saveHeldBills } from "@/lib/store";
 import { submitBill } from "@/lib/actions";
 import { Button, Card, Pill, ScheduleBadge, ScreenHeading, Select } from "./ui";
@@ -242,24 +242,118 @@ export const Billing = ({
     setReceived("");
     setTxnRef("");
     setExtra({ kind: "amount", value: 0 });
+    setAcceptedOffers([]);
     clientRef.current = newClientRef();
     clearSelection();
   };
 
+  /* ------------------------- offers & promotions ------------------------- */
+  // Preview of what the server works out when the bill is saved — same rules, same stock checks.
+  // (Per-customer / total limits are checked by the server.)
+  /** Bill amount of the counter's own lines, before any offer or automatic discount */
+  const paidSubtotal = useMemo(() => round2(lines.reduce((s, l) => s + l.per_unit_price * l.qty, 0)), [lines]);
+  const [acceptedOffers, setAcceptedOffers] = useState<string[]>([]);
+  const offerPlan = useMemo(() => {
+    const offerList = settings?.offers ?? [];
+    if (!offerList.length || !lines.length) return null;
+    const byId = new Map(medicines.map((m) => [m.id, m]));
+    const live = (id: string) =>
+      (byId.get(id)?.batches ?? [])
+        .filter((b) => b.stock_qty > 0 && expiryState(b.exp_date) !== "EXPIRED")
+        .sort((a, b) => a.exp_date.localeCompare(b.exp_date));
+    const packOf = (id: string) => live(id)[0]?.pack_size || 1;
+    const inCart = (id: string) => lines.filter((l) => l.medicine_id === id).reduce((s, l) => s + l.qty, 0);
+    const plan = planOffers(offerList, {
+      date: billDate,
+      paid: lines.map((l) => ({
+        medicine_id: l.medicine_id,
+        product_type: l.product_type,
+        qty: l.qty,
+        pack_size: l.pack_size,
+        amount: round2(l.per_unit_price * l.qty),
+      })),
+      paidSubtotal,
+      stockPacks: (id) => (live(id).reduce((s, b) => s + b.stock_qty, 0) - inCart(id)) / packOf(id),
+      accepted: new Set(acceptedOffers),
+    });
+    const rewards = plan.rewards.map((r) => {
+      const med = byId.get(r.medicine_id);
+      const batch = live(r.medicine_id)[0];
+      const pack = packOf(r.medicine_id);
+      const units = r.packs * pack;
+      const mrpUnit = batch ? round2(batch.mrp / pack) : 0;
+      const sellUnit = batch ? round2(batch.selling_price / pack) : 0;
+      const unitPrice = rewardUnitPrice(r.offer, sellUnit, pack);
+      return {
+        ...r,
+        name: med?.generic_name ?? "Offer item",
+        product_type: med?.product_type ?? "",
+        gst: batch?.gst_percent ?? 0,
+        units,
+        mrpUnit,
+        sellUnit,
+        unitPrice,
+        mrpValue: round2(units * mrpUnit),
+        charged: round2(units * unitPrice),
+      };
+    });
+    return { ...plan, rewards };
+  }, [settings?.offers, medicines, lines, billDate, paidSubtotal, acceptedOffers]);
+  const rewardRows = offerPlan?.rewards ?? [];
+  const freeItems = rewardRows.filter((r) => r.unitPrice <= 0);
+  const paidRewards = rewardRows.filter((r) => r.unitPrice > 0 && r.units > 0);
+  const availableOffers = offerPlan?.available ?? [];
+  const freeValue = round2(freeItems.reduce((s, f) => s + f.mrpValue, 0));
+  const promoByLine = useMemo(() => new Map((offerPlan?.lineDiscounts ?? []).map((d) => [d.index, d])), [offerPlan]);
+
   /* ------------------------------- totals -------------------------------- */
-  const totals = useMemo(() => calcBillTotals(lines), [lines]);
-  // Same order and rules as the server: the automatic category-wise slab discount (line by line),
-  // then bill offers (only while automatic discounts are off), then the counter's manual discount.
+  // Everything charged: the counter's lines, then discounted reward items (at selling price, with the
+  // offer discount kept separately) — the same lines, in the same order, as the server saves.
+  const charged = useMemo(
+    () => [
+      ...lines.map((l, i) => ({
+        qty: l.qty,
+        mrp_per_unit: l.mrp_per_unit,
+        per_unit_price: l.per_unit_price,
+        gst_percent: l.gst_percent,
+        product_type: l.product_type,
+        promo: promoByLine.get(i)?.amount ?? 0,
+        offer: promoByLine.get(i)?.offer ?? null,
+      })),
+      ...paidRewards.map((r) => ({
+        qty: r.units,
+        mrp_per_unit: r.mrpUnit,
+        per_unit_price: r.sellUnit,
+        gst_percent: r.gst,
+        product_type: r.product_type,
+        promo: round2((r.sellUnit - r.unitPrice) * r.units),
+        offer: r.offer,
+      })),
+    ],
+    [lines, promoByLine, paidRewards],
+  );
+  const totals = useMemo(() => calcBillTotals(charged), [charged]);
+  const promoTotal = round2(charged.reduce((s, c) => s + c.promo, 0));
+  // Same order and rules as the server: offers, then the automatic category-wise slab discount (line
+  // by line; not on lines an offer discounted unless it allows it), then bill offers (only while
+  // automatic discounts are off), then the counter's manual discount.
   const autoConfig = settings?.mode_settings.auto_discounts;
   const auto = useMemo(
     () =>
       autoConfig
-        ? calcAutoDiscounts(autoConfig, lines.map((l) => ({ product_type: l.product_type, amount: round2(l.per_unit_price * l.qty) })))
+        ? calcAutoDiscounts(
+            autoConfig,
+            charged.map((c) => ({
+              product_type: c.product_type,
+              amount: round2(c.per_unit_price * c.qty - c.promo),
+              no_discount: Boolean(c.offer && !c.offer.stack_auto),
+            })),
+          )
         : null,
-    [autoConfig, lines],
+    [autoConfig, charged],
   );
   const autoTotal = auto?.total ?? 0;
-  const afterType = round2(totals.grandTotal - autoTotal);
+  const afterType = round2(totals.grandTotal - promoTotal - autoTotal);
   const billOffer = calcBillOffer(autoConfig?.enabled ? [] : (settings?.mode_settings.bill_offers ?? []), afterType);
   const afterOffer = round2(afterType - billOffer.discount);
   /** Manual discount switched off while an automatic discount applies (Settings) */
@@ -270,54 +364,38 @@ export const Billing = ({
     const up = autoConfig.slabs.find((s) => s.enabled && s.min > auto.subtotal);
     return up ? { slab: up, shortBy: round2(up.min - auto.subtotal) } : null;
   }, [autoConfig, auto, lines.length]);
-  /* ------------------------- offers & free gifts ------------------------- */
-  // Preview of what the server will add when the bill is saved (same rules, same stock checks).
-  const freeItems = useMemo(() => {
-    const offerList = settings?.offers ?? [];
-    if (!offerList.length || !lines.length) return [];
-    const byId = new Map(medicines.map((m) => [m.id, m]));
-    const live = (id: string) =>
-      (byId.get(id)?.batches ?? [])
-        .filter((b) => b.stock_qty > 0 && expiryState(b.exp_date) !== "EXPIRED")
-        .sort((a, b) => a.exp_date.localeCompare(b.exp_date));
-    const packOf = (id: string) => live(id)[0]?.pack_size || 1;
-    const inCart = (id: string) => lines.filter((l) => l.medicine_id === id).reduce((s, l) => s + l.qty, 0);
-    return planOffers(
-      offerList,
-      billDate,
-      lines.map((l) => ({ medicine_id: l.medicine_id, qty: l.qty, pack_size: l.pack_size })),
-      totals.grandTotal,
-      (id) => (live(id).reduce((s, b) => s + b.stock_qty, 0) - inCart(id)) / packOf(id),
-    ).map((r) => {
-      const med = byId.get(r.medicine_id);
-      const batch = live(r.medicine_id)[0];
-      const units = r.packs * packOf(r.medicine_id);
-      return { ...r, name: med?.generic_name ?? "Free item", units, mrpValue: round2(units * (batch ? batch.mrp / (batch.pack_size || 1) : 0)), unitType: batch?.purchase_unit_type ?? "Piece" };
-    });
-  }, [settings?.offers, medicines, lines, billDate, totals.grandTotal]);
-  const freeValue = round2(freeItems.reduce((s, f) => s + f.mrpValue, 0));
 
-  // Tell the counter when an offer unlocks, or when its free item is out of stock (compared with the
+  // Tell the counter when an offer unlocks, or when its reward is out of stock (compared with the
   // previous render's offers, so each change is announced once).
-  const offerKey = freeItems.map((f) => `${f.offer.id}:${f.packs}/${f.earned}`).join("|");
+  const offerKey = [
+    ...rewardRows.map((f) => `${f.offer.id}:${f.packs}/${f.earned}`),
+    ...[...promoByLine.values()].map((d) => `${d.offer.id}:line`),
+    ...availableOffers.map((o) => `${o.id}:ask`),
+  ].join("|");
   const [announced, setAnnounced] = useState("");
   if (offerKey !== announced) {
     const before = announced;
     setAnnounced(offerKey);
-    const fresh = freeItems.find((f) => f.packs > 0 && !before.includes(`${f.offer.id}:${f.packs}/`));
-    const short = freeItems.find((f) => f.packs < f.earned);
+    const fresh = rewardRows.find((f) => f.packs > 0 && !before.includes(`${f.offer.id}:${f.packs}/`));
+    const short = rewardRows.find((f) => f.packs < f.earned);
+    const priceOff = [...promoByLine.values()].find((d) => !before.includes(`${d.offer.id}:line`));
+    const ask = availableOffers.find((o) => !before.includes(`${o.id}:ask`));
     if (short)
-      setNotice(`${short.name} (free with "${short.offer.name}") is out of stock — ${short.packs ? "only part of it" : "it"} can be given.`);
+      setNotice(`${short.name} (from "${short.offer.name}") is out of stock — ${short.packs ? "only part of it" : "it"} can be given.`);
     else if (fresh)
       setNotice(
-        fresh.offer.reward_medicine_id === fresh.offer.buy_medicine_id
-          ? `Congratulations! ${offerBadge(fresh.offer)} offer unlocked — ${fresh.name} added free.`
-          : `This purchase qualifies for a free gift. ${fresh.name} has been added to the bill.`,
+        fresh.unitPrice > 0
+          ? `Offer unlocked: ${offerBadge(fresh.offer)} — ${fresh.name} added at the offer price.`
+          : fresh.offer.type === "buy_get" && !fresh.offer.buy_category && fresh.offer.reward_medicine_id === fresh.offer.buy_medicine_id
+            ? `Congratulations! ${offerBadge(fresh.offer)} offer unlocked — ${fresh.name} added free.`
+            : `This purchase qualifies for a free gift. ${fresh.name} has been added to the bill.`,
       );
+    else if (priceOff) setNotice(`Special offer applied: ${priceOff.offer.name}.`);
+    else if (ask) setNotice(`This bill qualifies for "${ask.name}" — apply it from the Bill Summary.`);
   }
 
   const gstAfterAuto = round2(
-    lines.reduce((s, l, i) => s + calcIncludedGst(auto?.lines[i]?.net ?? l.per_unit_price * l.qty, l.gst_percent), 0),
+    charged.reduce((s, c, i) => s + calcIncludedGst(auto?.lines[i]?.net ?? c.per_unit_price * c.qty - c.promo, c.gst_percent), 0),
   );
   const extraDiscount = manualBlocked
     ? 0
@@ -384,6 +462,7 @@ export const Billing = ({
         billed_by: customer.billedBy,
         txn_ref: txnRef,
         extra_discount: extraDiscount,
+        accepted_offers: acceptedOffers,
         received_amount: receivedNum,
         payment_method: payment,
       }));
@@ -844,6 +923,11 @@ export const Billing = ({
                           <span className="text-gray-400 line-through">{amount(round2(line.per_unit_price * line.qty))}</span> −{auto.lines[index].percent}%
                         </p>
                       ) : null}
+                      {promoByLine.get(index) && (
+                        <p className="whitespace-nowrap text-[10.5px] font-bold text-[#15803d]">
+                          OFFER −{amount(promoByLine.get(index)!.amount)}
+                        </p>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -869,6 +953,26 @@ export const Billing = ({
                       </td>
                     </tr>
                   ))}
+                {paidRewards.map((r, k) => (
+                  <tr key={`reward-${r.offer.id}`} className="bg-[#f2fbf5] align-middle">
+                    <td className="px-1.5 py-3 text-center text-[12px] text-gray-500">★</td>
+                    <td className="px-1.5 py-3" colSpan={2}>
+                      <p className="text-[12.5px] font-semibold leading-tight text-gray-900">
+                        <span className="mr-1 rounded bg-[#15803d] px-1.5 py-0.5 text-[10px] font-extrabold text-white">OFFER</span>
+                        {r.name}
+                      </p>
+                      <p className="text-[11px] text-[#15803d]">
+                        {offerBadge(r.offer)} · {r.offer.name}
+                      </p>
+                    </td>
+                    <td className="px-1.5 py-3 text-center text-[12.5px] font-bold">{r.units}</td>
+                    <td className="px-1.5 py-3 text-right text-[12.5px] font-semibold text-gray-800">{amount(r.unitPrice)}</td>
+                    <td className="px-1.5 py-3 text-right">
+                      <p className="text-[12.5px] font-bold text-gray-900">{amount(auto?.lines[lines.length + k]?.net ?? r.charged)}</p>
+                      <p className="text-[10.5px] text-gray-400 line-through">{amount(round2(r.sellUnit * r.units))}</p>
+                    </td>
+                  </tr>
+                ))}
                 {!lines.length && (
                   <tr>
                     <td colSpan={6} className="px-4 py-14 text-center text-[13px] text-gray-400">
@@ -982,7 +1086,8 @@ export const Billing = ({
           <div className="space-y-2.5 text-[13px]">
             <Row label={`Sub Total at MRP (${totals.itemCount} Items)`} value={money(totals.subTotal)} />
             {totals.discount > 0 && <Row label="MRP to selling price" value={`− ${money(totals.discount)}`} tone="green" />}
-            <Row label="Bill amount (before auto discount)" value={money(totals.grandTotal)} />
+            {promoTotal > 0 && <Row label="Offer discounts" value={`− ${money(promoTotal)}`} tone="green" />}
+            <Row label="Bill amount (before auto discount)" value={money(round2(totals.grandTotal - promoTotal))} />
           </div>
 
           <div className="mt-3 rounded-lg border border-[#e3e7ea] bg-[#fafbfc] px-3 py-2.5 text-[12.5px]">
@@ -1040,6 +1145,26 @@ export const Billing = ({
             <p className="mt-3 rounded-lg bg-[var(--c-mint)] px-3 py-2 text-[11.5px] font-medium text-[var(--c-deep)]">
               Add {money(billOffer.next.short_by)} more to get {billOffer.next.percent}% off this bill.
             </p>
+          )}
+
+          {availableOffers.length > 0 && (
+            <div className="mt-3 rounded-lg border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-[12.5px]">
+              <p className="mb-1 font-bold text-[#92400e]">Offers available on this bill</p>
+              {availableOffers.map((o) => (
+                <div key={o.id} className="flex items-center justify-between gap-2 py-1">
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold text-gray-900">{o.name}</span>
+                    <span className="text-[11px] text-gray-600">{offerBadge(o)}</span>
+                  </span>
+                  <button
+                    onClick={() => setAcceptedOffers([...acceptedOffers, o.id])}
+                    className="shrink-0 cursor-pointer rounded-md bg-[var(--c-deep)] px-3 py-1 text-[12px] font-bold text-white hover:bg-[var(--c-hover)]"
+                  >
+                    Apply
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
 
           {freeItems.some((f) => f.packs > 0) && (
