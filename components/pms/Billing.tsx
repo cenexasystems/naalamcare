@@ -243,6 +243,7 @@ export const Billing = ({
     setTxnRef("");
     setExtra({ kind: "amount", value: 0 });
     setAcceptedOffers([]);
+    setOfferChoices({});
     clientRef.current = newClientRef();
     clearSelection();
   };
@@ -253,6 +254,8 @@ export const Billing = ({
   /** Bill amount of the counter's own lines, before any offer or automatic discount */
   const paidSubtotal = useMemo(() => round2(lines.reduce((s, l) => s + l.per_unit_price * l.qty, 0)), [lines]);
   const [acceptedOffers, setAcceptedOffers] = useState<string[]>([]);
+  /** Gift picked by the counter for offers that offer a choice (offer id → product id) */
+  const [offerChoices, setOfferChoices] = useState<Record<string, string>>({});
   const offerPlan = useMemo(() => {
     const offerList = settings?.offers ?? [];
     if (!offerList.length || !lines.length) return null;
@@ -275,6 +278,7 @@ export const Billing = ({
       paidSubtotal,
       stockPacks: (id) => (live(id).reduce((s, b) => s + b.stock_qty, 0) - inCart(id)) / packOf(id),
       accepted: new Set(acceptedOffers),
+      choices: offerChoices,
     });
     const rewards = plan.rewards.map((r) => {
       const med = byId.get(r.medicine_id);
@@ -298,12 +302,28 @@ export const Billing = ({
       };
     });
     return { ...plan, rewards };
-  }, [settings?.offers, medicines, lines, billDate, paidSubtotal, acceptedOffers]);
+  }, [settings?.offers, medicines, lines, billDate, paidSubtotal, acceptedOffers, offerChoices]);
   const rewardRows = offerPlan?.rewards ?? [];
   const freeItems = rewardRows.filter((r) => r.unitPrice <= 0);
   const paidRewards = rewardRows.filter((r) => r.unitPrice > 0 && r.units > 0);
   const availableOffers = offerPlan?.available ?? [];
   const freeValue = round2(freeItems.reduce((s, f) => s + f.mrpValue, 0));
+  /** For offers with a choice of gift: let the counter pick which product to give. */
+  const giftPicker = (r: { offer: { id: string }; medicine_id: string; options: string[] }) =>
+    r.options.length > 1 ? (
+      <select
+        value={r.medicine_id}
+        onChange={(e) => setOfferChoices({ ...offerChoices, [r.offer.id]: e.target.value })}
+        aria-label="Choose the gift"
+        className="mt-1 h-7 max-w-[180px] rounded-md border border-[#bbf7d0] bg-white px-1.5 text-[11.5px] font-semibold text-gray-800 outline-none"
+      >
+        {r.options.map((id) => (
+          <option key={id} value={id}>
+            {medicines.find((m) => m.id === id)?.generic_name ?? "Product"}
+          </option>
+        ))}
+      </select>
+    ) : null;
   const promoByLine = useMemo(() => new Map((offerPlan?.lineDiscounts ?? []).map((d) => [d.index, d])), [offerPlan]);
 
   /* ------------------------------- totals -------------------------------- */
@@ -463,6 +483,7 @@ export const Billing = ({
         txn_ref: txnRef,
         extra_discount: extraDiscount,
         accepted_offers: acceptedOffers,
+        offer_choices: offerChoices,
         received_amount: receivedNum,
         payment_method: payment,
       }));
@@ -944,6 +965,7 @@ export const Billing = ({
                         <p className="text-[11px] text-[#15803d]">
                           {offerBadge(f.offer)} · {f.offer.name}
                         </p>
+                        {giftPicker(f)}
                       </td>
                       <td className="px-1.5 py-3 text-center text-[12.5px] font-bold">{f.units}</td>
                       <td className="px-1.5 py-3" />
@@ -964,6 +986,7 @@ export const Billing = ({
                       <p className="text-[11px] text-[#15803d]">
                         {offerBadge(r.offer)} · {r.offer.name}
                       </p>
+                      {giftPicker(r)}
                     </td>
                     <td className="px-1.5 py-3 text-center text-[12.5px] font-bold">{r.units}</td>
                     <td className="px-1.5 py-3 text-right text-[12.5px] font-semibold text-gray-800">{amount(r.unitPrice)}</td>

@@ -235,7 +235,7 @@ export type Bill = {
   received_amount: number;
   change_amount: number;
   payment_method: PaymentMethod;
-  status: "COMPLETED" | "HELD";
+  status: "COMPLETED" | "HELD" | "CANCELLED";
   mode: Mode | null;
   /** Settled so far (checkout + later receipts) */
   paid_amount: number;

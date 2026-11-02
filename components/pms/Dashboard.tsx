@@ -49,7 +49,7 @@ export const Dashboard = ({
   const periodBills = useMemo(
     () =>
       bills
-        .filter((b) => inRange(b.bill_date, range))
+        .filter((b) => b.status !== "CANCELLED" && inRange(b.bill_date, range))
         .sort((a, b) => b.bill_date.localeCompare(a.bill_date) || b.created_at.localeCompare(a.created_at)),
     [bills, range],
   );

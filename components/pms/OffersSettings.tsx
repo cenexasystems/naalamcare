@@ -41,6 +41,8 @@ type Draft = {
   buy_qty: string;
   reward_same: boolean;
   reward_medicine_id: string;
+  /** Other products the counter may give instead */
+  reward_choices: string[];
   reward_qty: string;
   reward_mode: Offer["reward_mode"];
   reward_value: string;
@@ -69,6 +71,7 @@ const blank = (type: OfferType): Draft => ({
   buy_qty: "1",
   reward_same: type === "buy_get",
   reward_medicine_id: "",
+  reward_choices: [],
   reward_qty: "1",
   reward_mode: "free",
   reward_value: "",
@@ -99,6 +102,7 @@ const fromOffer = (o: Offer): Draft => ({
   buy_qty: String(o.buy_qty),
   reward_same: o.type === "buy_get" && !o.buy_category && o.reward_medicine_id === o.buy_medicine_id,
   reward_medicine_id: o.reward_medicine_id ?? "",
+  reward_choices: o.reward_choices ?? [],
   reward_qty: String(o.reward_qty),
   reward_mode: o.reward_mode,
   reward_value: num(o.reward_value),
@@ -712,6 +716,36 @@ const OfferModal = ({
                 </label>
               )}
               {(isGift || byCategory || !d.reward_same) && productSelect(d.reward_medicine_id, (id) => set({ reward_medicine_id: id }))}
+            </Field>
+            <Field label="Staff may give instead" hint="Optional — the counter picks one of these on the bill">
+              <div className="flex flex-wrap gap-1.5">
+                {d.reward_choices.map((id) => (
+                  <span key={id} className="flex items-center gap-1 rounded-md border border-[#e3e7ea] bg-[#fafbfc] py-1 pl-2 pr-1 text-[12px] font-semibold">
+                    {sorted.find((m) => m.id === id)?.generic_name ?? "Product"}
+                    <button
+                      onClick={() => set({ reward_choices: d.reward_choices.filter((x) => x !== id) })}
+                      aria-label="Remove"
+                      className="cursor-pointer rounded p-0.5 text-gray-400 hover:text-red-600"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <Select
+                value=""
+                onChange={(e) => e.target.value && set({ reward_choices: [...new Set([...d.reward_choices, e.target.value])] })}
+                className="mt-1.5"
+              >
+                <option value="">+ Add a product</option>
+                {sorted
+                  .filter((m) => !d.reward_choices.includes(m.id))
+                  .map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.generic_name} ({m.total_stock} in stock)
+                    </option>
+                  ))}
+              </Select>
             </Field>
             <Field label="Reward packs">
               <TextInput type="number" value={d.reward_qty} onChange={(e) => set({ reward_qty: e.target.value })} />

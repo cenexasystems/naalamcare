@@ -472,6 +472,8 @@ export const offers = pgTable("offers", {
   buyQty: integer("buy_qty").notNull().default(1),
   rewardMedicineId: uuid("reward_medicine_id"),
   rewardQty: integer("reward_qty").notNull().default(1),
+  /** JSON list of other products the counter may give instead */
+  rewardChoices: text("reward_choices").notNull().default("[]"),
   /** "free" | "percent" | "price" and its value (% off, or ₹ per pack) */
   rewardMode: text("reward_mode").notNull().default("free"),
   rewardValue: numeric("reward_value", { precision: 12, scale: 2 }).notNull().default("0"),

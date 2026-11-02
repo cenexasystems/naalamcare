@@ -214,6 +214,11 @@ export default async function InvoicePage({
 
           <div className="flex-1 text-center">
             <h2 className="text-[17px] font-bold underline">Tax Invoice</h2>
+            {bill.status === "CANCELLED" && (
+              <p className="mt-1 inline-block rotate-[-4deg] border-2 border-red-600 px-2 py-0.5 text-[15px] font-black tracking-widest text-red-600">
+                CANCELLED
+              </p>
+            )}
             {wholesale && <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide">Wholesale</p>}
           </div>
 

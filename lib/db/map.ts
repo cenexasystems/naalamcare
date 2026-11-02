@@ -333,6 +333,7 @@ export const mapOffer = (row: any): Offer => ({
   buy_qty: row.buyQty ?? 1,
   reward_medicine_id: row.rewardMedicineId ?? null,
   reward_qty: row.rewardQty ?? 1,
+  reward_choices: parseJson<string[]>(row.rewardChoices, []).filter((x) => typeof x === "string"),
   reward_mode: row.rewardMode === "percent" || row.rewardMode === "price" ? row.rewardMode : "free",
   reward_value: toNum(row.rewardValue),
   off_mode: row.offMode === "amount" || row.offMode === "price" ? row.offMode : "percent",

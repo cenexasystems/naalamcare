@@ -45,6 +45,8 @@ export type Offer = {
   buy_qty: number;
   /** buy_get / bill_gift: the reward product */
   reward_medicine_id: string | null;
+  /** Other products the counter may give instead of the reward product (staff choose on the bill) */
+  reward_choices: string[];
   /** Packs given per reward */
   reward_qty: number;
   reward_mode: RewardMode;
@@ -102,6 +104,8 @@ export type PaidLine = { medicine_id: string; product_type?: string; qty: number
 export type RewardPlan = {
   offer: Offer;
   medicine_id: string;
+  /** Products the counter may pick from for this reward (first = the offer's own reward) */
+  options: string[];
   /** Packs the bill earned (after the per-bill cap) */
   earned: number;
   /** Packs actually given (limited by stock) */
@@ -152,6 +156,8 @@ export const planOffers = (
     stockPacks: (medicineId: string) => number;
     accepted?: Set<string>;
     canUse?: (offer: Offer) => boolean;
+    /** Gift picked by the counter, per offer id (only honoured when it is one of the offer's choices) */
+    choices?: Record<string, string>;
   },
 ): OfferPlan => {
   const usable = offers
@@ -202,14 +208,20 @@ export const planOffers = (
     else rewards.push({ offer: gift, earned: gift.reward_qty, medicine_id: gift.reward_medicine_id! });
   }
 
+  const pick = (o: Offer, fallback: string) => {
+    const chosen = ctx.choices?.[o.id];
+    return chosen && (chosen === o.reward_medicine_id || (o.reward_choices ?? []).includes(chosen)) ? chosen : fallback;
+  };
   const left = new Map<string, number>();
   return {
-    rewards: rewards.map(({ offer, earned, medicine_id }) => {
+    rewards: rewards.map(({ offer, earned, medicine_id: own }) => {
+      const medicine_id = pick(offer, own);
+      const options = [own, ...(offer.reward_choices ?? []).filter((c) => c !== own)];
       const capped = offer.max_free_per_bill > 0 ? Math.min(earned, offer.max_free_per_bill) : earned;
       const available = left.has(medicine_id) ? left.get(medicine_id)! : Math.max(0, Math.floor(ctx.stockPacks(medicine_id)));
       const packs = Math.min(capped, available);
       left.set(medicine_id, available - packs);
-      return { offer, medicine_id, earned: capped, packs };
+      return { offer, medicine_id, options, earned: capped, packs };
     }),
     lineDiscounts,
     claimed,

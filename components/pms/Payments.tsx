@@ -1,13 +1,13 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Search, Printer, Undo2, IndianRupee, FileText, AlertTriangle, Wallet } from "lucide-react";
+import { Search, Printer, Undo2, IndianRupee, FileText, AlertTriangle, Wallet, Ban } from "lucide-react";
 import type { Bill, Customer, LedgerData } from "@/lib/types";
 import { amount, dateSlash, money, todayIso } from "@/lib/format";
 import { round2 } from "@/lib/calc";
 import { unitPaidOf } from "@/lib/auto-discounts";
 import { formatReturnNo } from "@/lib/ids";
-import { createSalesReturn, recordCustomerPayment } from "@/lib/actions";
+import { cancelBill, createSalesReturn, recordCustomerPayment } from "@/lib/actions";
 import { Button, Card, Field, Modal, PageTitle, Pill, Select, StatTile, TextInput } from "./ui";
 import { act, useMode } from "./mode-context";
 import { useSettings } from "./data";
@@ -169,7 +169,8 @@ export const Payments = ({
                 <tbody className="divide-y divide-[#f1f3f5]">
                   {filtered.map((bill) => {
                     const st = billStatus(bill, today);
-                    const returnable = bill.items.some((i) => i.qty - i.returned_qty > 0);
+                    const cancelled = bill.status === "CANCELLED";
+                    const returnable = !cancelled && bill.items.some((i) => i.qty - i.returned_qty > 0);
                     return (
                       <tr key={bill.id} className="transition hover:bg-[#fafbfc]">
                         <td className="td font-semibold text-gray-900">{bill.id}</td>
@@ -183,8 +184,12 @@ export const Payments = ({
                         </td>
                         <td className="td">{bill.due_date ? dateSlash(bill.due_date) : "—"}</td>
                         <td className="td">
-                          <Pill tone={STATUS_TONE[st]}>{st === "PARTIAL" ? "PART PAID" : st}</Pill>
-                          {bill.returned_amount > 0 && (
+                          {cancelled ? (
+                            <Pill tone="red">CANCELLED</Pill>
+                          ) : (
+                            <Pill tone={STATUS_TONE[st]}>{st === "PARTIAL" ? "PART PAID" : st}</Pill>
+                          )}
+                          {!cancelled && bill.returned_amount > 0 && (
                             <span className="ml-1.5">
                               <Pill tone="gray">RETURN</Pill>
                             </span>
@@ -208,6 +213,27 @@ export const Payments = ({
                                 className="cursor-pointer rounded-md p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-[var(--c-deep)]"
                               >
                                 <Undo2 className="h-4 w-4" />
+                              </button>
+                            )}
+                            {role === "admin" && !cancelled && (
+                              <button
+                                onClick={async () => {
+                                  if (
+                                    !confirm(
+                                      `Cancel bill ${bill.id}? Every item on it (paid and free) goes back into stock and ${money(
+                                        Math.max(0, bill.grand_total - bill.returned_amount),
+                                      )} is refunded or taken off the amount due. This can't be undone.`,
+                                    )
+                                  )
+                                    return;
+                                  const res = await act(cancelBill(mode, bill.id));
+                                  if (res.ok) onChanged(`Bill ${bill.id} cancelled — stock restored${res.data.refund > 0 ? `, refund ${money(res.data.refund)}` : ""}.`);
+                                }}
+                                aria-label="Cancel bill"
+                                title="Cancel bill"
+                                className="cursor-pointer rounded-md p-1.5 text-gray-500 transition hover:bg-red-50 hover:text-red-600"
+                              >
+                                <Ban className="h-4 w-4" />
                               </button>
                             )}
                             <button
@@ -541,6 +567,29 @@ export const ReturnModal = ({
           </tbody>
         </table>
       </div>
+      {/* Offer items (free / at an offer price) stay with the bill unless returned — prompt when the qualifying items come back. */}
+      {(() => {
+        const offerItems = bill.items.filter((i) => i.offer_name && i.qty - i.returned_qty > 0);
+        const returningOthers = bill.items.some((i) => !i.offer_name && Math.floor(Number(qty[i.id]) || 0) > 0);
+        if (!offerItems.length || !returningOthers) return null;
+        return (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12.5px] text-amber-900">
+            <p className="font-semibold">This bill has offer items:</p>
+            <p className="mt-0.5">
+              {offerItems.map((i) => `${i.generic_name} × ${i.qty - i.returned_qty} (${i.is_free ? "free" : "offer price"} — ${i.offer_name})`).join(", ")}
+            </p>
+            <p className="mt-1">If the customer no longer qualifies for the offer, take them back too.</p>
+            <button
+              onClick={() =>
+                setQty({ ...qty, ...Object.fromEntries(offerItems.map((i) => [i.id, String(i.qty - i.returned_qty)])) })
+              }
+              className="mt-2 cursor-pointer rounded-md border border-amber-300 bg-white px-3 py-1 text-[12px] font-bold text-amber-800 hover:bg-amber-100"
+            >
+              Return the offer items too
+            </button>
+          </div>
+        );
+      })()}
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Field label="Refund method">
           <Select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)}>

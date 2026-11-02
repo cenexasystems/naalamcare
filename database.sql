@@ -573,3 +573,9 @@ ALTER TABLE "offers" DROP CONSTRAINT IF EXISTS "offers_type_check";
 ALTER TABLE "offers" ADD CONSTRAINT "offers_type_check" CHECK ("type" IN ('buy_get', 'bill_gift', 'price_off'));
 ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "promo_discount" numeric(12, 2) DEFAULT '0' NOT NULL;
 ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "promo_discount" numeric(12, 2) DEFAULT '0' NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 21. Offers: other gift products the counter may give instead
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "reward_choices" text DEFAULT '[]' NOT NULL;

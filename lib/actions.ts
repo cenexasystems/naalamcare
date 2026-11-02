@@ -1144,6 +1144,8 @@ export async function submitBill(
     extra_discount?: number;
     /** Offers set to "counter accepts" that the counter accepted (the server still checks they qualify) */
     accepted_offers?: string[];
+    /** Gift the counter picked, per offer id (must be one of that offer's choices) */
+    offer_choices?: Record<string, string>;
     received_amount: number;
     payment_method: string;
     bill_date?: string;
@@ -1358,7 +1360,9 @@ export async function submitBill(
           };
           const accepted = new Set((Array.isArray(payload.accepted_offers) ? payload.accepted_offers : []).map(str));
 
-          const rewardIds = [...new Set(offerList.map((o) => o.reward_medicine_id).filter((x): x is string => Boolean(x)))];
+          const rewardIds = [
+            ...new Set(offerList.flatMap((o) => [o.reward_medicine_id, ...o.reward_choices]).filter((x): x is string => Boolean(x))),
+          ];
           const stockByMed = new Map<string, (typeof schema.batches.$inferSelect)[]>();
           for (const id of rewardIds) {
             const rows = await tx
@@ -1382,6 +1386,7 @@ export async function submitBill(
             stockPacks: (id) => (stockByMed.get(id) ?? []).reduce((s, b) => s + b.stockQty, 0) / packOf(id),
             accepted,
             canUse,
+            choices: payload.offer_choices && typeof payload.offer_choices === "object" ? payload.offer_choices : undefined,
           });
           // Price offers: a discount on the paid lines they apply to.
           for (const d of plan.lineDiscounts) {
@@ -2107,6 +2112,10 @@ export async function saveOffer(payload: any): Promise<ActionResult<string>> {
       buy_qty: type === "bill_gift" ? 1 : Number(payload?.buy_qty),
       reward_medicine_id: type === "price_off" ? null : str(payload?.reward_medicine_id) || null,
       reward_qty: type === "price_off" ? 1 : Number(payload?.reward_qty),
+      reward_choices:
+        type === "price_off"
+          ? []
+          : [...new Set((Array.isArray(payload?.reward_choices) ? payload.reward_choices : []).map(str).filter(Boolean))].slice(0, 20) as string[],
       reward_mode: type === "buy_get" ? rewardMode : "free",
       reward_value: type === "buy_get" && rewardMode !== "free" ? round2(num(payload?.reward_value)) : 0,
       off_mode: offMode,
@@ -2126,7 +2135,7 @@ export async function saveOffer(payload: any): Promise<ActionResult<string>> {
     };
     const errors = checkOffer(offer);
     if (errors.length) fail(errors.join(" "));
-    const ids = [offer.reward_medicine_id, offer.buy_medicine_id].filter((x): x is string => Boolean(x));
+    const ids = [offer.reward_medicine_id, offer.buy_medicine_id, ...offer.reward_choices].filter((x): x is string => Boolean(x));
     if (ids.length) {
       const found = await db.select({ id: schema.medicines.id }).from(schema.medicines).where(inArray(schema.medicines.id, ids));
       if (found.length !== new Set(ids).size) fail("Pick the products from the catalogue.");
@@ -2142,6 +2151,7 @@ export async function saveOffer(payload: any): Promise<ActionResult<string>> {
       buyQty: offer.buy_qty,
       rewardMedicineId: offer.reward_medicine_id,
       rewardQty: offer.reward_qty,
+      rewardChoices: JSON.stringify(offer.reward_choices),
       rewardMode: offer.reward_mode,
       rewardValue: String(offer.reward_value),
       offMode: offer.off_mode,
@@ -2262,5 +2272,39 @@ export async function offerHistory(from: string, to: string): Promise<ActionResu
       value: round2(r.isFree ? num(r.lineMrp) : num(r.promo)),
       bill_total: round2(num(r.grandTotal)),
     }));
+  });
+}
+
+/**
+ * Cancel a whole bill: every item still on it — paid and free — goes back into stock through the
+ * normal return (so the refund / set-off against the amount due is recorded the same way), and the
+ * bill is marked CANCELLED. Its invoice number is kept so numbering never has gaps.
+ */
+export async function cancelBill(
+  mode: Mode,
+  billId: string,
+  refundMethod = "Cash",
+): Promise<ActionResult<{ amount: number; refund: number }>> {
+  return run(async () => {
+    await requireMode(mode, { admin: true });
+    const rows = await db
+      .select()
+      .from(schema.bills)
+      .where(and(eq(schema.bills.id, str(billId)), eq(schema.bills.mode, mode)))
+      .limit(1);
+    if (!rows.length) fail("Bill not found in this dashboard.");
+    if (rows[0].status === "CANCELLED") fail("This bill is already cancelled.");
+    const items = await db.select().from(schema.billItems).where(eq(schema.billItems.billId, rows[0].id));
+    const remaining = items
+      .map((i) => ({ bill_item_id: i.id, qty: i.qty - i.returnedQty }))
+      .filter((i) => i.qty > 0);
+    let result = { amount: 0, refund: 0 };
+    if (remaining.length) {
+      const ret = await createSalesReturn(mode, { bill_id: rows[0].id, items: remaining, refund_method: refundMethod, reason: "Bill cancelled" });
+      if (!ret.ok) throw new UserError(ret.error);
+      result = { amount: ret.data.amount, refund: ret.data.refund };
+    }
+    await db.update(schema.bills).set({ status: "CANCELLED" }).where(eq(schema.bills.id, rows[0].id));
+    return result;
   });
 }
