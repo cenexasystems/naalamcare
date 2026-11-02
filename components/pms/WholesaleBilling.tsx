@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import type { Batch, Bill, CartLine, Customer, DiscountTier, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
 import { calcBillOffer, calcBillTotals, round2 } from "@/lib/calc";
-import { calcTypeDiscounts } from "@/lib/type-discounts";
+import { calcAutoDiscounts, slabRange } from "@/lib/auto-discounts";
 import { amount, money, monthShort, stockBreakdown, todayIso, unitNoun, type SellBy } from "@/lib/format";
 import { listHeldBills, saveHeldBills } from "@/lib/store";
 import { addPharmacyAtBilling, submitBill } from "@/lib/actions";
@@ -302,13 +302,19 @@ export const WholesaleBilling = ({
     [lines, customerDiscount, tiers],
   );
   const totals = useMemo(() => calcBillTotals(priced), [priced]);
-  // Same order as the server: product-type discounts, then the bill offer.
-  const typeDiscount = calcTypeDiscounts(
-    ms?.type_discounts ?? [],
-    priced.map((l) => ({ product_type: l.product_type, amount: round2(l.per_unit_price * l.qty) })),
+  // Same order and rules as the server: the pharmacy's own discount and quantity tiers are already in
+  // each line's price; then wholesale's automatic category-wise slab discount (line by line); bill
+  // offers only while that is off.
+  const autoConfig = ms?.auto_discounts;
+  const auto = useMemo(
+    () =>
+      autoConfig
+        ? calcAutoDiscounts(autoConfig, priced.map((l) => ({ product_type: l.product_type, amount: round2(l.per_unit_price * l.qty) })))
+        : null,
+    [autoConfig, priced],
   );
-  const afterType = round2(totals.grandTotal - typeDiscount.total);
-  const billOffer = calcBillOffer(ms?.bill_offers ?? [], afterType);
+  const afterType = round2(totals.grandTotal - (auto?.total ?? 0));
+  const billOffer = calcBillOffer(autoConfig?.enabled ? [] : (ms?.bill_offers ?? []), afterType);
   const payable = round2(afterType - billOffer.discount);
   const receivedNum = Number(received) || 0;
   const isCredit = payment === "Credit";
@@ -720,7 +726,14 @@ export const WholesaleBilling = ({
                           className="mx-auto block h-7 w-[52px] rounded-md border border-[#e3e7ea] text-center text-[12.5px] font-bold outline-none transition focus:border-[var(--c-primary)]"
                         />
                       </td>
-                      <td className="px-1.5 py-3 text-right text-[12.5px] text-gray-700">{pct}</td>
+                      <td className="px-1.5 py-3 text-right text-[12.5px] text-gray-700">
+                        {pct}
+                        {auto?.lines[index]?.discount ? (
+                          <span className="block text-[11px] font-semibold text-[var(--c-deep)]">
+                            +{auto.lines[index].percent}% auto
+                          </span>
+                        ) : null}
+                      </td>
                       <td className="px-1.5 py-3 text-right text-[12.5px] font-bold text-gray-900">
                         {amount(round2(perUnit * line.qty))}
                       </td>
@@ -954,9 +967,15 @@ export const WholesaleBilling = ({
           <div className="mt-4 space-y-2.5 text-[13px]">
             <Row label={`Sub Total (MRP, ${totals.itemCount} items)`} value={money(totals.subTotal)} />
             <Row label="Discount" value={money(totals.discount)} green />
-            {typeDiscount.parts.map((p) => (
-              <Row key={p.type} label={`${p.type} discount (${p.percent}% on ${money(p.subtotal)})`} value={`− ${money(p.discount)}`} green />
+            {autoConfig?.enabled && auto?.slab && auto.total > 0 && (
+              <p className="text-[11.5px] font-semibold text-[var(--c-deep)]">
+                Automatic discount · {auto.slab.name} ({slabRange(auto.slab)})
+              </p>
+            )}
+            {(auto?.byCategory ?? []).map((g) => (
+              <Row key={g.category} label={`${g.category} (${g.percent}%)`} value={`− ${money(g.discount)}`} green />
             ))}
+            {(auto?.total ?? 0) > 0 && <Row label="Total automatic discount" value={`− ${money(auto!.total)}`} green />}
             {billOffer.offer && (
               <Row
                 label={`Bill offer (${billOffer.offer.percent}%${billOffer.offer.min_amount > 0 ? ` on ₹${amount(billOffer.offer.min_amount)}+` : ""})`}

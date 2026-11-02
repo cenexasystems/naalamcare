@@ -32,6 +32,7 @@ import {
   mapPurchaseOrder,
   mapStockMovement,
 } from "./map";
+import { syncCategories, type AutoDiscountConfig } from "../auto-discounts";
 
 /* ==========================================================================
    Read queries
@@ -202,7 +203,21 @@ export const applyModeShopDetails = (shop: ShopSettings, ms: ModeSettings): Shop
 export async function getScopedSettings(mode: Mode): Promise<ScopedSettings | null> {
   const [shop, modeSettings] = await Promise.all([getSettings(), getModeSettings(mode)]);
   if (!shop) return null;
-  return { ...applyModeShopDetails(shop, modeSettings), mode_settings: modeSettings };
+  const synced = syncCategories(modeSettings.auto_discounts, shop.product_types);
+  // Retail only — see getAutoDiscountConfig.
+  const withCategories = { ...modeSettings, auto_discounts: mode === "retail" ? synced : { ...synced, enabled: false } };
+  return { ...applyModeShopDetails(shop, withCategories), mode_settings: withCategories };
+}
+
+/**
+ * This dashboard's automatic-discount rules, with categories matching the shop's product types.
+ * Automatic discounts are a retail feature: wholesale bills never get them (wholesale keeps its
+ * pharmacy discounts and quantity tiers), whatever is stored.
+ */
+export async function getAutoDiscountConfig(mode: Mode): Promise<AutoDiscountConfig> {
+  const [shop, modeSettings] = await Promise.all([getSettings(), getModeSettings(mode)]);
+  const config = syncCategories(modeSettings.auto_discounts, shop?.product_types ?? []);
+  return mode === "retail" ? config : { ...config, enabled: false };
 }
 
 export async function getLedger(mode: Mode): Promise<LedgerData> {

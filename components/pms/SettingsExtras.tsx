@@ -13,8 +13,11 @@ import {
   resetLoginPasscode,
   saveInvoicePromo,
   savePurchaseUnits,
-  saveProductTypes,
-  saveTypeDiscounts,
+  saveAutoDiscounts,
+  addDiscountCategory,
+  renameDiscountCategory,
+  deleteDiscountCategory,
+  categoryUsage,
   saveModeSettings,
   saveUser,
   type AppUser,
@@ -23,8 +26,7 @@ import { Button, Card, Field, Modal, Pill, Select, TextInput } from "./ui";
 import { act, useMode, useModeState } from "./mode-context";
 import { useReconciliation } from "./data";
 import { PromoCard } from "./InvoicePromoPopup";
-import type { TypeDiscountRule } from "@/lib/type-discounts";
-import { productTypeOptions } from "@/lib/product-types";
+import { validateAutoDiscounts, type AutoDiscountConfig, type DiscountCategory } from "@/lib/auto-discounts";
 import { normalisePromo, type InvoicePromo, type PromoGroup, type PromoRow } from "@/lib/promo";
 
 const ALL_METHODS: PaymentMethod[] = ["Cash", "UPI", "Card", "Bank Transfer", "Cheque"];
@@ -277,20 +279,8 @@ export const ModeSettingsCard = ({
    ------------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------------
-   Product types — Tablet, Injection, Cartridge… offered on every medicine.
+   Purchase units (Strip, Piece, Bottle…) — the pack a batch is bought in.
    ------------------------------------------------------------------------ */
-
-export const ProductTypesCard = ({ types, onChanged }: { types: string[]; onChanged: (message?: string) => void }) => (
-  <NameListCard
-    title="Product Types"
-    description="Choose one for each medicine (Inventory or Purchase). It prints in the Type column of bills and invoices. Shared by retail and wholesale."
-    placeholder="New type, e.g. Syrup"
-    initial={types}
-    save={saveProductTypes}
-    savedMessage="Product types saved."
-    onChanged={onChanged}
-  />
-);
 
 export const PurchaseUnitsCard = ({ units, onChanged }: { units: string[]; onChanged: (message?: string) => void }) => (
   <NameListCard
@@ -384,123 +374,325 @@ const NameListCard = ({
 };
 
 /* ------------------------------------------------------------------------
-   Product-type discounts — automatic % off at billing, banded by how much
-   of that product type is on the bill.
+   Billing · Automatic Discounts — category-wise % by bill slab, per dashboard.
+   Categories are the shop's Product Types (shared); each dashboard has its
+   own slabs, %s and on/off switches.
    ------------------------------------------------------------------------ */
 
-type BandDraft = { from: string; to: string; percent: string };
-type RuleDraft = { type: string; bands: BandDraft[] };
+type SlabDraft = { id: string; name: string; min: string; max: string; enabled: boolean; rates: Record<string, string> };
 
-const toDraft = (rules: TypeDiscountRule[]): RuleDraft[] =>
-  rules.map((r) => ({
-    type: r.type,
-    bands: r.bands.map((b) => ({ from: String(b.from), to: b.to ? String(b.to) : "", percent: String(b.percent) })),
+const toSlabDrafts = (cfg: AutoDiscountConfig): SlabDraft[] =>
+  cfg.slabs.map((s) => ({
+    id: s.id,
+    name: s.name,
+    min: String(s.min),
+    max: s.max === null ? "" : String(s.max),
+    enabled: s.enabled,
+    rates: Object.fromEntries(cfg.categories.map((c) => [c.name, String(s.rates[c.name] ?? 0)])),
   }));
 
-export const TypeDiscountsCard = ({
+const fromDrafts = (
+  base: AutoDiscountConfig,
+  slabs: SlabDraft[],
+  categories: DiscountCategory[],
+  patch: Pick<AutoDiscountConfig, "enabled" | "allow_manual" | "default_category">,
+): AutoDiscountConfig => ({
+  ...base,
+  ...patch,
+  categories,
+  slabs: slabs.map((s) => ({
+    id: s.id,
+    name: s.name.trim(),
+    min: s.min.trim() === "" ? NaN : Number(s.min),
+    max: s.max.trim() === "" ? null : Number(s.max),
+    enabled: s.enabled,
+    rates: Object.fromEntries(categories.map((c) => [c.name, s.rates[c.name]?.trim() === "" ? NaN : Number(s.rates[c.name] ?? 0)])),
+  })),
+});
+
+export const AutoDiscountsCard = ({
   settings,
-  productTypes,
   onChanged,
 }: {
   settings: ModeSettings;
-  productTypes: string[];
   onChanged: (message?: string) => void;
 }) => {
   const mode = useMode();
-  const [rules, setRules] = useState<RuleDraft[]>(() => toDraft(settings.type_discounts));
+  const cfg = settings.auto_discounts;
+  const [enabled, setEnabled] = useState(cfg.enabled);
+  const [allowManual, setAllowManual] = useState(cfg.allow_manual);
+  const [defaultCategory, setDefaultCategory] = useState(cfg.default_category);
+  const [categories, setCategories] = useState<DiscountCategory[]>(cfg.categories);
+  const [slabs, setSlabs] = useState<SlabDraft[]>(() => toSlabDrafts(cfg));
   const [saving, setSaving] = useState(false);
+  const [usage, setUsage] = useState<Record<string, number>>({});
+  const [newCategory, setNewCategory] = useState("");
+  const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null);
 
-  const setRule = (ri: number, patch: Partial<RuleDraft>) => setRules(rules.map((r, i) => (i === ri ? { ...r, ...patch } : r)));
-  const setBand = (ri: number, bi: number, patch: Partial<BandDraft>) =>
-    setRule(ri, { bands: rules[ri].bands.map((b, i) => (i === bi ? { ...b, ...patch } : b)) });
-  const unused = productTypes.filter((t) => !rules.some((r) => r.type.toLowerCase() === t.toLowerCase()));
+  React.useEffect(() => {
+    categoryUsage()
+      .then((res) => res.ok && setUsage(Object.fromEntries(Object.entries(res.data).map(([k, v]) => [k.toLowerCase(), v]))))
+      .catch(() => undefined);
+  }, []);
+
+  const draft = fromDrafts(cfg, slabs, categories, { enabled, allow_manual: allowManual, default_category: defaultCategory });
+  const errors = validateAutoDiscounts(draft);
+  const setSlab = (i: number, patch: Partial<SlabDraft>) => setSlabs(slabs.map((s, n) => (n === i ? { ...s, ...patch } : s)));
+
+  const addSlab = () => {
+    // A new top slab: starts a rupee above the current highest, which then gets an upper limit.
+    const sorted = [...slabs].sort((a, b) => Number(a.min) - Number(b.min));
+    const top = sorted.at(-1);
+    const start = top ? Math.max(Number(top.min) + 1000, 0) : 0;
+    const next = sorted.map((s) => (s === top ? { ...s, max: String(start - 0.01) } : s));
+    setSlabs([
+      ...next,
+      {
+        id: `slab-${Date.now()}`,
+        name: `Slab ${slabs.length + 1}`,
+        min: String(start),
+        max: "",
+        enabled: true,
+        rates: Object.fromEntries(categories.map((c) => [c.name, "0"])),
+      },
+    ]);
+  };
 
   const save = async () => {
     setSaving(true);
-    const payload = rules.map((r) => ({
-      type: r.type,
-      bands: r.bands.map((b) => ({ from: Number(b.from) || 0, to: Number(b.to) || 0, percent: Number(b.percent) || 0 })),
-    }));
-    const res = await act(saveTypeDiscounts(mode, payload));
+    const res = await act(saveAutoDiscounts(mode, draft));
     setSaving(false);
-    if (res.ok) onChanged("Product-type discounts saved. New bills use them straight away.");
+    if (res.ok) onChanged(enabled ? "Automatic discounts saved — new bills use them now." : "Automatic discounts saved (switched off).");
   };
+
+  // Category changes save straight away and reload this card, so save slab edits first.
+  const categoryAction = async (run: () => Promise<ActionResult<null>>, message: string) => {
+    const res = await act(run());
+    if (res.ok) onChanged(message);
+  };
+
+  const sortedIdx = slabs.map((s, i) => ({ s, i })).sort((a, b) => Number(a.s.min) - Number(b.s.min));
 
   return (
     <Card className="mt-4 p-5">
-      <h3 className="mb-1 text-[15px] font-bold text-gray-900">Product-type Discounts</h3>
-      <p className="mb-4 text-[12px] text-gray-500">
-        Applied automatically when you bill on the {mode} dashboard. The lines of each product type on a bill are added
-        up; that total picks one band and its % comes off those lines. &ldquo;Up to&rdquo; is not included (₹999 – ₹6999
-        means ₹999.00 to ₹6998.99); leave it blank for no upper limit.
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-[15px] font-bold text-gray-900">
+          Billing · Automatic Discounts <span className="text-[12px] font-medium text-gray-500">— {MODE_LABEL[mode]}</span>
+        </h3>
+        <label className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-gray-800">
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="h-4 w-4 accent-[var(--c-primary)]" />
+          Apply automatically on {mode} bills
+        </label>
+      </div>
+      <p className="mb-4 text-[12px] leading-relaxed text-gray-500">
+        The bill total before this discount picks one slab. Each item then gets its own category&rsquo;s % in that slab
+        (item price × qty × %). A product&rsquo;s category is its Product Type (Inventory → edit medicine); products
+        without one use the default category. Saved bills keep the discount they were charged.
+        {enabled && " While this is on, Automatic bill offers (above) are paused so customers are never discounted twice."}
       </p>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {rules.map((rule, ri) => (
-          <div key={ri} className="rounded-lg border border-[#e5e7eb] p-3">
-            <div className="mb-2 flex items-center gap-2">
-              <Select value={rule.type} onChange={(e) => setRule(ri, { type: e.target.value })} className="font-semibold">
-                {productTypeOptions(productTypes, rule.type).map((t) => (
-                  <option key={t} value={t} disabled={t !== rule.type && rules.some((r) => r.type === t)}>
-                    {t}
-                  </option>
-                ))}
-              </Select>
-              <button
-                onClick={() => setRules(rules.filter((_, i) => i !== ri))}
-                aria-label="Remove product type"
-                className="cursor-pointer rounded-md p-2 text-gray-500 hover:bg-red-50 hover:text-red-600"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="mb-1 grid grid-cols-[1fr_1fr_80px_32px] gap-2 text-[11px] font-semibold text-gray-500">
-              <span>From ₹</span>
-              <span>Up to ₹</span>
-              <span>% off</span>
-              <span />
-            </div>
-            <div className="space-y-1.5">
-              {rule.bands.map((band, bi) => (
-                <div key={bi} className="grid grid-cols-[1fr_1fr_80px_32px] items-center gap-2">
-                  <TextInput type="number" value={band.from} onChange={(e) => setBand(ri, bi, { from: e.target.value })} placeholder="0" />
-                  <TextInput type="number" value={band.to} onChange={(e) => setBand(ri, bi, { to: e.target.value })} placeholder="No limit" />
-                  <TextInput type="number" value={band.percent} onChange={(e) => setBand(ri, bi, { percent: e.target.value })} placeholder="10" />
-                  <button
-                    onClick={() => setRule(ri, { bands: rule.bands.filter((_, i) => i !== bi) })}
-                    aria-label="Remove band"
-                    className="cursor-pointer rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={() => {
-                const last = rule.bands.at(-1);
-                setRule(ri, { bands: [...rule.bands, { from: last?.to || "", to: "", percent: "" }] });
-              }}
-              className="mt-2 flex cursor-pointer items-center gap-1 text-[12px] font-semibold text-[var(--c-deep)] hover:underline"
-            >
-              <Plus className="h-3.5 w-3.5" /> Add band
-            </button>
-          </div>
-        ))}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Default category" hint="For products with no category, or a switched-off one">
+          <Select value={defaultCategory} onChange={(e) => setDefaultCategory(e.target.value)}>
+            {categories.map((c) => (
+              <option key={c.name} value={c.name}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Manual discount at the counter">
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-[#e5e7eb] px-3 py-2.5 text-[13px] font-medium text-gray-800">
+            <input
+              type="checkbox"
+              checked={allowManual}
+              onChange={(e) => setAllowManual(e.target.checked)}
+              className="h-4 w-4 accent-[var(--c-primary)]"
+            />
+            Allow an extra manual discount on top of the automatic one (its cap still applies)
+          </label>
+        </Field>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-        <Button
-          variant="ghost"
-          className="py-2 text-[13px]"
-          disabled={!unused.length}
-          onClick={() => setRules([...rules, { type: unused[0], bands: [{ from: "0", to: "", percent: "" }] }])}
-        >
-          <Plus className="h-4 w-4" /> Add product type
+      <p className="mb-2 mt-5 text-[13px] font-bold text-gray-900">Slabs and % off</p>
+      <div className="overflow-x-auto rounded-lg border border-[#e5e7eb]">
+        <table className="w-full min-w-[640px] text-[12.5px]">
+          <thead>
+            <tr className="bg-[#f4f6f8] text-gray-700">
+              <th className="th">Slab</th>
+              <th className="th">From ₹</th>
+              <th className="th">Up to ₹</th>
+              <th className="th text-center">On</th>
+              {categories.map((c, ci) => (
+                <th key={c.name} className="th text-center">
+                  <span className={c.active ? "" : "text-gray-400 line-through"}>{c.name}</span>
+                  <label className="mt-1 flex cursor-pointer items-center justify-center gap-1 text-[10.5px] font-medium normal-case text-gray-500">
+                    <input
+                      type="checkbox"
+                      checked={c.active}
+                      onChange={(e) => setCategories(categories.map((x, n) => (n === ci ? { ...x, active: e.target.checked } : x)))}
+                      className="h-3.5 w-3.5 accent-[var(--c-primary)]"
+                    />
+                    on
+                  </label>
+                </th>
+              ))}
+              <th className="th" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#f1f3f5]">
+            {sortedIdx.map(({ s, i }) => (
+              <tr key={s.id} className={s.enabled ? "" : "bg-gray-50 text-gray-400"}>
+                <td className="td">
+                  <TextInput value={s.name} onChange={(e) => setSlab(i, { name: e.target.value })} className="w-[96px]" />
+                </td>
+                <td className="td">
+                  <TextInput type="number" value={s.min} onChange={(e) => setSlab(i, { min: e.target.value })} className="w-[96px]" />
+                </td>
+                <td className="td">
+                  <TextInput
+                    type="number"
+                    value={s.max}
+                    onChange={(e) => setSlab(i, { max: e.target.value })}
+                    placeholder="No limit"
+                    className="w-[96px]"
+                  />
+                </td>
+                <td className="td text-center">
+                  <input
+                    type="checkbox"
+                    checked={s.enabled}
+                    onChange={(e) => setSlab(i, { enabled: e.target.checked })}
+                    aria-label={`${s.name} on`}
+                    className="h-4 w-4 accent-[var(--c-primary)]"
+                  />
+                </td>
+                {categories.map((c) => (
+                  <td key={c.name} className="td text-center">
+                    <div className="mx-auto flex w-[78px] items-center gap-1">
+                      <TextInput
+                        type="number"
+                        value={s.rates[c.name] ?? "0"}
+                        onChange={(e) => setSlab(i, { rates: { ...s.rates, [c.name]: e.target.value } })}
+                        disabled={!c.active}
+                        className="text-center"
+                      />
+                      <span className="text-gray-500">%</span>
+                    </div>
+                  </td>
+                ))}
+                <td className="td">
+                  <button
+                    onClick={() => setSlabs(slabs.filter((_, n) => n !== i))}
+                    aria-label={`Delete ${s.name}`}
+                    className="cursor-pointer rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1.5 text-[11.5px] text-gray-500">
+        From and Up to are both included (₹700 – ₹999.99). A switched-off slab gives no discount for bills in its range.
+      </p>
+      <Button variant="ghost" className="mt-2 py-2 text-[13px]" onClick={addSlab}>
+        <Plus className="h-4 w-4" /> Add slab
+      </Button>
+
+      {errors.length > 0 && (
+        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-700">
+          {errors.map((e) => (
+            <p key={e}>• {e}</p>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-4 flex justify-end">
+        <Button onClick={save} disabled={saving || errors.length > 0}>
+          <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save automatic discounts"}
         </Button>
-        <Button onClick={save} disabled={saving}>
-          <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save discounts"}
-        </Button>
+      </div>
+
+      <div className="mt-5 border-t border-[#eef1f3] pt-4">
+        <p className="mb-1 text-[13px] font-bold text-gray-900">Categories</p>
+        <p className="mb-3 text-[11.5px] text-gray-500">
+          Shared by retail and wholesale, and offered as Product Type on every medicine. These changes save at once and
+          reload this card — save slab edits first. A category can be deleted only when no medicine uses it.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {categories.map((c) =>
+            renaming?.from === c.name ? (
+              <span key={c.name} className="flex items-center gap-1.5 rounded-lg border border-[var(--c-primary)] bg-white p-1">
+                <TextInput
+                  autoFocus
+                  value={renaming.to}
+                  onChange={(e) => setRenaming({ ...renaming, to: e.target.value })}
+                  className="h-8 w-[130px]"
+                />
+                <Button
+                  className="px-2.5 py-1.5 text-[12px]"
+                  onClick={() => categoryAction(() => renameDiscountCategory(renaming.from, renaming.to), `Category renamed to ${renaming.to}.`)}
+                >
+                  Save
+                </Button>
+                <Button variant="ghost" className="px-2.5 py-1.5 text-[12px]" onClick={() => setRenaming(null)}>
+                  Cancel
+                </Button>
+              </span>
+            ) : (
+              <span
+                key={c.name}
+                className="flex items-center gap-1.5 rounded-lg border border-[#e3e7ea] bg-[#fafbfc] py-1.5 pl-3 pr-1.5 text-[13px] font-semibold text-gray-800"
+              >
+                {c.name}
+                <span className="text-[11px] font-medium text-gray-500">
+                  {usage[c.name.toLowerCase()] ?? 0} med{(usage[c.name.toLowerCase()] ?? 0) === 1 ? "" : "s"}
+                </span>
+                {c.name === defaultCategory && <Pill tone="green">DEFAULT</Pill>}
+                <button
+                  onClick={() => setRenaming({ from: c.name, to: c.name })}
+                  aria-label={`Rename ${c.name}`}
+                  className="cursor-pointer rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-[var(--c-deep)]"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm(`Delete the ${c.name} category?`))
+                      categoryAction(() => deleteDiscountCategory(c.name), `${c.name} deleted.`);
+                  }}
+                  aria-label={`Delete ${c.name}`}
+                  className="cursor-pointer rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            ),
+          )}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <TextInput
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            placeholder="New category, e.g. Syrup"
+            className="max-w-[240px]"
+          />
+          <Button
+            variant="ghost"
+            className="py-2 text-[13px]"
+            disabled={!newCategory.trim()}
+            onClick={() => {
+              const name = newCategory.trim();
+              setNewCategory("");
+              categoryAction(() => addDiscountCategory(name), `${name} added — set its % in each slab and save.`);
+            }}
+          >
+            <Plus className="h-4 w-4" /> Add category
+          </Button>
+        </div>
       </div>
     </Card>
   );

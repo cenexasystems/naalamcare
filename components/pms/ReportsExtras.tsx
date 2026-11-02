@@ -5,6 +5,7 @@ import type { BatchRow, Bill, Customer, LedgerData, Supplier } from "@/lib/types
 import type { Sheet } from "@/lib/xlsx";
 import { amount, dateSlash, todayIso } from "@/lib/format";
 import { calcIncludedGst, round2 } from "@/lib/calc";
+import { unitPaidOf } from "@/lib/auto-discounts";
 import { Card } from "./ui";
 
 /* ==========================================================================
@@ -59,11 +60,8 @@ const costOf = (batchRows: BatchRow[]) => {
   };
 };
 
-/** Bill-level discount spread across lines so line totals add up to the bill. */
-const factorOf = (bill: Bill) => {
-  const lines = bill.items.reduce((s, i) => s + i.line_amount, 0);
-  return lines > 0 ? bill.grand_total / lines : 1;
-};
+/** What a unit on each line actually cost: its automatic discount off, bill-wide discounts shared out. */
+const paidOf = (bill: Bill) => unitPaidOf(bill);
 
 const inRange = (date: string, start: string, end: string) => date >= start && date <= end;
 
@@ -75,13 +73,13 @@ export const buildReport = (kind: ReportKind, ctx: Ctx): ReportTableData | null 
     case "PRODUCTS": {
       const map = new Map<string, { name: string; qty: number; returned: number; sales: number; cost: number; bills: Set<string> }>();
       for (const bill of bills) {
-        const f = factorOf(bill);
+        const paid = paidOf(bill);
         for (const i of bill.items) {
           const cur = map.get(i.medicine_id) || { name: i.generic_name, qty: 0, returned: 0, sales: 0, cost: 0, bills: new Set<string>() };
           const net = i.qty - i.returned_qty;
           cur.qty += i.qty;
           cur.returned += i.returned_qty;
-          cur.sales += i.per_unit_price * net * f;
+          cur.sales += paid(i) * net;
           cur.cost += cost(i) * net;
           cur.bills.add(bill.id);
           map.set(i.medicine_id, cur);
@@ -160,12 +158,12 @@ export const buildReport = (kind: ReportKind, ctx: Ctx): ReportTableData | null 
       let sales = 0;
       let costTotal = 0;
       const rows = bills.map((bill, n) => {
-        const f = factorOf(bill);
+        const paid = paidOf(bill);
         let s = 0;
         let c = 0;
         for (const i of bill.items) {
           const net = i.qty - i.returned_qty;
-          s += i.per_unit_price * net * f;
+          s += paid(i) * net;
           c += cost(i) * net;
         }
         sales += s;
@@ -194,10 +192,10 @@ export const buildReport = (kind: ReportKind, ctx: Ctx): ReportTableData | null 
     case "TAX": {
       const slabs = new Map<number, { sales: number; gst: number }>();
       for (const bill of bills) {
-        const f = factorOf(bill);
+        const paid = paidOf(bill);
         for (const i of bill.items) {
           const slab = Math.round(i.gst_percent);
-          const value = i.per_unit_price * (i.qty - i.returned_qty) * f;
+          const value = paid(i) * (i.qty - i.returned_qty);
           const cur = slabs.get(slab) || { sales: 0, gst: 0 };
           cur.sales += value;
           cur.gst += calcIncludedGst(value, slab);

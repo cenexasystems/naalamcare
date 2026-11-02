@@ -13,3 +13,6 @@ export const formatBillId = (num: number, prefix = "") => `${prefix}${num}`;
 
 export const formatPoNumber = (num: number, mode: Mode) =>
   `${mode === "wholesale" ? "WPO" : "PO"}-${num.toString().padStart(5, "0")}`;
+
+/** Printable number of a sales return (its own invoice), e.g. "R-3F2A9C1B". */
+export const formatReturnNo = (id: string) => `R-${id.replace(/-/g, "").slice(0, 8).toUpperCase()}`;

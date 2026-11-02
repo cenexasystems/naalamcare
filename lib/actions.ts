@@ -4,9 +4,16 @@ import { db } from "./db/client";
 import * as schema from "./db/schema";
 import { and, asc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { formatBillId, formatCustomerId, formatPoNumber } from "./ids";
-import { calcBillOffer, calcBillTotals, round2 } from "./calc";
+import { calcBillOffer, calcBillTotals, calcIncludedGst, round2 } from "./calc";
+import {
+  billLineNets,
+  calcAutoDiscounts,
+  normaliseAutoDiscounts,
+  slabRange,
+  validateAutoDiscounts,
+  type AutoDiscountConfig,
+} from "./auto-discounts";
 import { normalisePromo } from "./promo";
-import { calcTypeDiscounts, normaliseTypeDiscounts } from "./type-discounts";
 import { parseProductTypes, parsePurchaseUnits } from "./product-types";
 import {
   AuthError,
@@ -24,7 +31,7 @@ import {
   writeSession,
 } from "./auth";
 import { isMode, type Mode, type SessionInfo } from "./mode";
-import { listStockMovements, getModeSettings } from "./db/queries";
+import { listStockMovements, getModeSettings, getAutoDiscountConfig, getSettings } from "./db/queries";
 import type { ActionResult, PurchaseOrderItem, StockMovement } from "./types";
 
 /* ==========================================================================
@@ -951,23 +958,133 @@ export async function savePurchaseUnits(units: string[]): Promise<ActionResult<s
   });
 }
 
-/** Settings → Product-type Discounts: automatic % off by product type, applied when bills are saved. */
-export async function saveTypeDiscounts(mode: Mode, payload: unknown): Promise<ActionResult<null>> {
+/* ==========================================================================
+   Settings → Billing · Automatic Discounts (admin only)
+   ========================================================================== */
+
+/** Read numbers as typed (no clamping) so validation can point at mistakes instead of fixing them silently. */
+const coerceAutoDiscounts = (payload: any): AutoDiscountConfig => ({
+  enabled: Boolean(payload?.enabled),
+  allow_manual: payload?.allow_manual !== false,
+  default_category: str(payload?.default_category),
+  categories: (Array.isArray(payload?.categories) ? payload.categories : []).map((c: any) => ({
+    name: str(c?.name),
+    active: c?.active !== false,
+  })),
+  slabs: (Array.isArray(payload?.slabs) ? payload.slabs : []).map((s: any, i: number) => ({
+    id: str(s?.id) || `slab-${i + 1}`,
+    name: str(s?.name) || `Slab ${i + 1}`,
+    min: Number(s?.min),
+    max: s?.max === null || s?.max === undefined || s?.max === "" ? null : Number(s.max),
+    enabled: s?.enabled !== false,
+    rates: Object.fromEntries(Object.entries(s?.rates ?? {}).map(([k, v]) => [str(k), Number(v)])),
+  })),
+});
+
+/** Save one dashboard's slab rules. Takes effect on the next bill; saved bills keep what they were charged. */
+export async function saveAutoDiscounts(mode: Mode, payload: unknown): Promise<ActionResult<null>> {
   return run(async () => {
     await requireMode(mode, { admin: true });
-    const rules = normaliseTypeDiscounts(payload);
-    for (const rule of rules)
-      for (let i = 1; i < rule.bands.length; i += 1) {
-        const prev = rule.bands[i - 1];
-        if (prev.to === 0 || prev.to > rule.bands[i].from)
-          fail(`${rule.type}: the bands overlap — each amount must fall in exactly one band.`);
-      }
-    const values = { typeDiscounts: JSON.stringify(rules) };
+    if (mode !== "retail") fail("Automatic discounts are for retail bills only.");
+    const coerced = coerceAutoDiscounts(payload);
+    const errors = validateAutoDiscounts(coerced);
+    if (errors.length) fail(errors.join(" "));
+    const values = { autoDiscounts: JSON.stringify(normaliseAutoDiscounts(coerced)) };
     await db
       .insert(schema.modeSettings)
       .values({ mode, ...values })
       .onConflictDoUpdate({ target: schema.modeSettings.mode, set: values });
     return null;
+  });
+}
+
+/** Rename a discount category everywhere: the product-type list, every medicine using it, and both dashboards' rules. */
+export async function renameDiscountCategory(from: string, to: string): Promise<ActionResult<null>> {
+  return run(async () => {
+    await requireAdmin();
+    const oldName = str(from);
+    const newName = str(to).slice(0, 40);
+    if (!oldName || !newName) fail("Enter the new category name.");
+    if (oldName === newName) return null;
+    const shop = await getSettings();
+    const types = shop?.product_types ?? [];
+    if (!types.some((t) => t.toLowerCase() === oldName.toLowerCase())) fail(`${oldName} is not in the category list.`);
+    if (types.some((t) => t.toLowerCase() === newName.toLowerCase() && t.toLowerCase() !== oldName.toLowerCase()))
+      fail(`There is already a category called ${newName}.`);
+    const renamed = types.map((t) => (t.toLowerCase() === oldName.toLowerCase() ? newName : t));
+    await db.transaction(async (tx) => {
+      await tx.update(schema.settings).set({ productTypes: JSON.stringify(renamed) }).where(eq(schema.settings.id, 1));
+      await tx
+        .update(schema.medicines)
+        .set({ productType: newName })
+        .where(sql`lower(${schema.medicines.productType}) = ${oldName.toLowerCase()}`);
+      for (const m of ["retail", "wholesale"] as Mode[]) {
+        const ms = await getModeSettings(m);
+        const cfg = ms.auto_discounts;
+        const swap = (x: string) => (x.toLowerCase() === oldName.toLowerCase() ? newName : x);
+        const next: AutoDiscountConfig = {
+          ...cfg,
+          default_category: swap(cfg.default_category),
+          categories: cfg.categories.map((c) => ({ ...c, name: swap(c.name) })),
+          slabs: cfg.slabs.map((s) => ({ ...s, rates: Object.fromEntries(Object.entries(s.rates).map(([k, v]) => [swap(k), v])) })),
+        };
+        await tx
+          .insert(schema.modeSettings)
+          .values({ mode: m, autoDiscounts: JSON.stringify(next) })
+          .onConflictDoUpdate({ target: schema.modeSettings.mode, set: { autoDiscounts: JSON.stringify(next) } });
+      }
+    });
+    return null;
+  });
+}
+
+/** Add a category (it becomes a Product Type too). It starts at 0% in every slab until its %s are set. */
+export async function addDiscountCategory(name: string): Promise<ActionResult<null>> {
+  return run(async () => {
+    await requireAdmin();
+    const clean = str(name).slice(0, 40);
+    if (!clean) fail("Enter the category name.");
+    const shop = await getSettings();
+    const types = shop?.product_types ?? [];
+    if (types.some((t) => t.toLowerCase() === clean.toLowerCase())) fail(`There is already a category called ${clean}.`);
+    await db.update(schema.settings).set({ productTypes: JSON.stringify([...types, clean]) }).where(eq(schema.settings.id, 1));
+    return null;
+  });
+}
+
+/** Delete a category — only once no medicine uses it, and never a dashboard's default category. */
+export async function deleteDiscountCategory(name: string): Promise<ActionResult<null>> {
+  return run(async () => {
+    await requireAdmin();
+    const target = str(name);
+    const used = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.medicines)
+      .where(sql`lower(${schema.medicines.productType}) = ${target.toLowerCase()}`);
+    if ((used[0]?.n ?? 0) > 0)
+      fail(`${used[0].n} medicine(s) are in ${target}. Move them to another category first (Inventory → edit medicine).`);
+    for (const m of ["retail", "wholesale"] as Mode[]) {
+      const ms = await getModeSettings(m);
+      if (ms.auto_discounts.default_category.toLowerCase() === target.toLowerCase())
+        fail(`${target} is the default category for ${m}. Choose another default first.`);
+    }
+    const shop = await getSettings();
+    const types = (shop?.product_types ?? []).filter((t) => t.toLowerCase() !== target.toLowerCase());
+    if (!types.length) fail("Keep at least one category.");
+    await db.update(schema.settings).set({ productTypes: JSON.stringify(types) }).where(eq(schema.settings.id, 1));
+    return null;
+  });
+}
+
+/** How many medicines are in each category (for the Settings screen). */
+export async function categoryUsage(): Promise<ActionResult<Record<string, number>>> {
+  return run(async () => {
+    await requireAdmin();
+    const rows = await db
+      .select({ type: schema.medicines.productType, n: sql<number>`count(*)::int` })
+      .from(schema.medicines)
+      .groupBy(schema.medicines.productType);
+    return Object.fromEntries(rows.map((r) => [r.type || "", r.n]));
   });
 }
 
@@ -1021,6 +1138,8 @@ export async function submitBill(
     await requireMode(mode);
     const actor = await actorOf();
     const settings = await getModeSettings(mode);
+    // This dashboard's own slab rules — retail rules never reach a wholesale bill or vice versa.
+    const autoConfig = await getAutoDiscountConfig(mode);
     const clientRef = str(payload.client_ref) || null;
 
     const method = str(payload.payment_method);
@@ -1180,15 +1299,26 @@ export async function submitBill(
       const totals = calcBillTotals(
         priced.map((p) => ({ qty: p.qty, mrp_per_unit: p.mrpPerUnit, per_unit_price: p.perUnit, gst_percent: num(p.batch.gstPercent) })),
       );
-      // Product-type discounts and bill offers come from the saved settings, never from the counter.
-      const typeDiscount = calcTypeDiscounts(
-        settings.type_discounts,
+      // Discounts come from the saved settings and each medicine's own category — never from the
+      // counter. 1) automatic category-wise slab discount, worked out line by line on the subtotal
+      // before it; 2) bill offers, only while automatic discounts are off (never both); 3) the
+      // counter's manual discount, within its cap.
+      const auto = calcAutoDiscounts(
+        autoConfig,
         priced.map((p) => ({ product_type: p.med.productType, amount: round2(p.perUnit * p.qty) })),
-      ).total;
-      const afterType = round2(totals.grandTotal - typeDiscount);
-      const offerDiscount = calcBillOffer(settings.bill_offers, afterType).discount;
-      const afterOffer = round2(afterType - offerDiscount);
+      );
+      const afterAuto = round2(totals.grandTotal - auto.total);
+      const offerDiscount = autoConfig.enabled ? 0 : calcBillOffer(settings.bill_offers, afterAuto).discount;
+      const afterOffer = round2(afterAuto - offerDiscount);
       const extraDiscount = Math.min(Math.max(0, round2(num(payload.extra_discount))), afterOffer);
+      if (extraDiscount > 0 && auto.total > 0 && !autoConfig.allow_manual)
+        fail("A manual discount can't be added on top of the automatic discount (Settings → Automatic Discounts).");
+      // GST is inside the prices: take it out of what each line actually costs after its automatic discount.
+      const gstAmount = round2(
+        priced.reduce((s, p, i) => s + calcIncludedGst(auto.lines[i].net, num(p.batch.gstPercent)), 0),
+      );
+      const taxableAmount = round2(afterAuto - gstAmount);
+      const gstPercent = taxableAmount > 0 ? round2((gstAmount / taxableAmount) * 100) : 0;
       if (settings.max_discount_percent > 0 && extraDiscount > round2((totals.grandTotal * settings.max_discount_percent) / 100) + 0.01)
         fail(`The extra discount can't be more than ${settings.max_discount_percent}% of the bill.`);
       const grandTotal = round2(afterOffer - extraDiscount);
@@ -1243,10 +1373,12 @@ export async function submitBill(
         txnRef: str(payload.txn_ref),
         billDate,
         subTotal: totals.subTotal.toString(),
-        discount: round2(totals.discount + typeDiscount + offerDiscount + extraDiscount).toString(),
-        taxableAmount: totals.taxableAmount.toString(),
-        gstAmount: totals.gstAmount.toString(),
-        gstPercent: totals.gstPercent.toString(),
+        discount: round2(totals.discount + auto.total + offerDiscount + extraDiscount).toString(),
+        autoDiscount: auto.total.toString(),
+        autoSlab: auto.total > 0 && auto.slab ? `${auto.slab.name} (${slabRange(auto.slab)})` : "",
+        taxableAmount: taxableAmount.toString(),
+        gstAmount: gstAmount.toString(),
+        gstPercent: gstPercent.toString(),
         grandTotal: grandTotal.toString(),
         receivedAmount: received.toString(),
         changeAmount: round2(received - grandTotal).toString(),
@@ -1257,7 +1389,8 @@ export async function submitBill(
         status: "COMPLETED",
       });
 
-      for (const p of priced) {
+      for (const [index, p] of priced.entries()) {
+        const autoLine = auto.lines[index];
         const lineMrp = round2(p.mrpPerUnit * p.qty);
         const lineAmount = round2(p.perUnit * p.qty);
         await tx.insert(schema.billItems).values({
@@ -1284,6 +1417,9 @@ export async function submitBill(
           lineDiscount: round2(lineMrp - lineAmount).toString(),
           gstPercent: p.batch.gstPercent,
           costPerUnit: p.costPerUnit.toString(),
+          autoCategory: autoLine.category,
+          autoPercent: autoLine.percent.toString(),
+          autoDiscount: autoLine.discount.toString(),
         });
         await logMovement(tx, {
           mode,
@@ -1388,9 +1524,13 @@ export async function createSalesReturn(
       if (!billRows.length) fail("Bill not found in this dashboard.");
       const bill = billRows[0];
       const items = await tx.select().from(schema.billItems).where(eq(schema.billItems.billId, bill.id));
-      const linesTotal = items.reduce((s, i) => s + num(i.lineAmount), 0);
-      // Spread any counter discount across the lines so refunds match what was paid.
-      const factor = linesTotal > 0 ? num(bill.grandTotal) / linesTotal : 1;
+      // Refund what each line actually cost: its own automatic discount off, then any bill-wide
+      // discount (offer, counter discount) shared across lines — so refunds match what was paid.
+      const nets = billLineNets({
+        grand_total: num(bill.grandTotal),
+        items: items.map((i) => ({ line_amount: num(i.lineAmount), auto_discount: num(i.autoDiscount) })),
+      });
+      const unitPaid = new Map(items.map((i, idx) => [i.id, i.qty > 0 ? nets[idx] / i.qty : 0]));
 
       let amount = 0;
       const returned: { bill_item_id: string; batch_id: string; generic_name: string; batch_no: string; qty: number; amount: number }[] = [];
@@ -1417,7 +1557,7 @@ export async function createSalesReturn(
           .returning();
         if (!stock.length) fail(`Batch ${item!.batchNo} is no longer in this dashboard's inventory.`);
 
-        const value = round2(num(item!.perUnitPrice) * w.qty * factor);
+        const value = round2((unitPaid.get(item!.id) ?? 0) * w.qty);
         amount = round2(amount + value);
         returned.push({
           bill_item_id: item!.id,

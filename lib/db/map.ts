@@ -19,6 +19,7 @@ import type {
 import { isMode, type Mode } from "../mode";
 import { normalisePromo } from "../promo";
 import { normaliseTypeDiscounts } from "../type-discounts";
+import { defaultAutoDiscounts, normaliseAutoDiscounts } from "../auto-discounts";
 import { parseProductTypes, parsePurchaseUnits } from "../product-types";
 
 const modeOrNull = (value: unknown): Mode | null => (isMode(value) ? value : null);
@@ -144,6 +145,9 @@ export const mapBillItem = (row: any): BillItem => ({
   gst_percent: toNum(row.gstPercent),
   cost_per_unit: toNum(row.costPerUnit),
   returned_qty: row.returnedQty ?? 0,
+  auto_category: row.autoCategory || "",
+  auto_percent: toNum(row.autoPercent),
+  auto_discount: toNum(row.autoDiscount),
 });
 
 export const mapBill = (row: any, items: any[] = []): Bill => ({
@@ -176,6 +180,8 @@ export const mapBill = (row: any, items: any[] = []): Bill => ({
   due_amount: toNum(row.dueAmount),
   due_date: row.dueDate || null,
   returned_amount: toNum(row.returnedAmount),
+  auto_discount: toNum(row.autoDiscount),
+  auto_slab: row.autoSlab || "",
   shipping_address: row.shippingAddress || "",
   customer_gstin: row.customerGstin || "",
   items: items.map(mapBillItem),
@@ -225,6 +231,7 @@ export const mapModeSettings = (row: any, mode: Mode): ModeSettings => ({
   invoice_terms: row?.invoiceTerms ?? "",
   invoice_promo: normalisePromo(row?.invoicePromo),
   type_discounts: normaliseTypeDiscounts(row?.typeDiscounts),
+  auto_discounts: row?.autoDiscounts ? normaliseAutoDiscounts(row.autoDiscounts) : defaultAutoDiscounts([], false),
   gstin: row?.gstin ?? "",
   dl_no: row?.dlNo ?? "",
   shop_name: row?.shopName ?? "",

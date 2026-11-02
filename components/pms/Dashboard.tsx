@@ -17,6 +17,7 @@ import {
 import type { Bill, LedgerData, MedicineWithBatches } from "@/lib/types";
 import { amount, dateSlash, expiryState, money, monthSlash, timeLabel, todayIso } from "@/lib/format";
 import { round2 } from "@/lib/calc";
+import { unitPaidOf } from "@/lib/auto-discounts";
 import { PERIOD_LABEL, inRange, periodRange, type Period } from "@/lib/period";
 import { Card, PageTitle, Pill, ValuePopup } from "./ui";
 import { PeriodFilter } from "./PeriodFilter";
@@ -73,12 +74,11 @@ export const Dashboard = ({
     for (const bill of periodBills) {
       discount += bill.discount;
       returns += bill.returned_amount;
-      const lines = bill.items.reduce((s, i) => s + i.line_amount, 0);
-      const f = lines > 0 ? bill.grand_total / lines : 1;
+      const paid = unitPaidOf(bill);
       for (const i of bill.items) {
         const net = i.qty - i.returned_qty;
         units += net;
-        sales += i.per_unit_price * net * f;
+        sales += paid(i) * net;
         cost += (i.cost_per_unit || batchCost.get(i.batch_id) || 0) * net;
       }
     }

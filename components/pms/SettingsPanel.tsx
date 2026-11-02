@@ -11,7 +11,7 @@ import {
 import { THEMES, THEME_KEYS, resolveTheme } from "@/lib/format";
 import { deleteSupplier, saveSettings, saveSupplier } from "@/lib/actions";
 import { act, useMode, useModeState } from "./mode-context";
-import { InvoicePromoCard, LoginPasscodesCard, ProductTypesCard, PurchaseUnitsCard, TypeDiscountsCard, ModeSettingsCard, ReconciliationCard, UsersCard } from "./SettingsExtras";
+import { AutoDiscountsCard, InvoicePromoCard, LoginPasscodesCard, PurchaseUnitsCard, ModeSettingsCard, ReconciliationCard, UsersCard } from "./SettingsExtras";
 import { downloadBlob } from "@/lib/xlsx";
 import { Button, Card, Field, Modal, PageTitle, TextInput } from "./ui";
 
@@ -35,6 +35,9 @@ export const SettingsPanel = ({
   const [settings, setSettings] = useState<ShopSettings | null>(() => toForm(initialSettings));
   const [supplierDraft, setSupplierDraft] = useState<Supplier | null>(null);
   const [addingSupplier, setAddingSupplier] = useState(false);
+  /** Retail admins get a Discounts tab (automatic category-wise discounts are retail only). */
+  const showTabs = isAdmin && mode === "retail" && !!initialSettings;
+  const [tab, setTab] = useState<"general" | "discounts">("general");
 
   /* Re-sync when the server row changes after a save, otherwise the panel
      keeps showing the pre-save draft. */
@@ -86,6 +89,37 @@ export const SettingsPanel = ({
         title={mode === "wholesale" ? "Wholesale Settings" : "Settings"}
         subtitle="Shop details, GSTIN, licence, invoicing, payments, pricing and alerts are set separately for retail and wholesale"
       />
+
+      {showTabs && (
+        <div className="mb-4 flex w-fit gap-1 rounded-xl border border-[#e5e7eb] bg-white p-1 shadow-sm">
+          {([
+            ["general", "General"],
+            ["discounts", "Discounts"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`cursor-pointer rounded-lg px-4 py-1.5 text-[13px] font-bold transition ${
+                tab === key ? "bg-[var(--c-deep)] text-white" : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Discounts tab: automatic category-wise discounts by bill slab, and the categories themselves.
+          Keyed by the category list so it reloads after a category is added / renamed / deleted. */}
+      {showTabs && tab === "discounts" && initialSettings && (
+        <AutoDiscountsCard
+          key={`auto-${mode}-${initialSettings.product_types.join("|")}`}
+          settings={initialSettings.mode_settings}
+          onChanged={onChanged}
+        />
+      )}
+
+      <div className={showTabs && tab === "discounts" ? "hidden" : ""}>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {/* Shop details */}
@@ -383,18 +417,7 @@ export const SettingsPanel = ({
         <ModeSettingsCard key={mode} settings={initialSettings.mode_settings} onChanged={onChanged} />
       )}
 
-      {isAdmin && initialSettings && <ProductTypesCard types={initialSettings.product_types} onChanged={onChanged} />}
-
       {isAdmin && initialSettings && <PurchaseUnitsCard units={initialSettings.purchase_units} onChanged={onChanged} />}
-
-      {isAdmin && initialSettings && (
-        <TypeDiscountsCard
-          key={`type-discounts-${mode}`}
-          settings={initialSettings.mode_settings}
-          productTypes={initialSettings.product_types}
-          onChanged={onChanged}
-        />
-      )}
 
       {isAdmin && initialSettings && (
         <InvoicePromoCard
@@ -457,6 +480,7 @@ export const SettingsPanel = ({
           onChanged(msg);
         }}
       />
+      </div>
     </div>
   );
 };

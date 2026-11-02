@@ -6,6 +6,7 @@
 import type { Mode } from "./mode";
 import type { InvoicePromo } from "./promo";
 import type { TypeDiscountRule } from "./type-discounts";
+import type { AutoDiscountConfig } from "./auto-discounts";
 export type { Mode } from "./mode";
 
 /** Server actions return this instead of throwing, so messages survive production builds. */
@@ -186,6 +187,10 @@ export type BillItem = {
   cost_per_unit: number;
   /** Units already returned against this line */
   returned_qty: number;
+  /** Automatic slab discount on this line as billed: category, % and ₹ ("" / 0 on older bills) */
+  auto_category: string;
+  auto_percent: number;
+  auto_discount: number;
 };
 
 export type Bill = {
@@ -231,6 +236,9 @@ export type Bill = {
   due_amount: number;
   due_date: string | null;
   returned_amount: number;
+  /** Automatic category-wise discount on the bill, and the slab it fell in (snapshot) */
+  auto_discount: number;
+  auto_slab: string;
   shipping_address: string;
   customer_gstin: string;
   items: BillItem[];
@@ -340,6 +348,8 @@ export type ModeSettings = {
   invoice_promo: InvoicePromo;
   /** Automatic % off by product type, banded by that type's total on the bill */
   type_discounts: TypeDiscountRule[];
+  /** Automatic category-wise discounts by bill slab (Settings → Billing · Automatic Discounts) */
+  auto_discounts: AutoDiscountConfig;
   /** This mode's GSTIN and drug licence number, printed on its invoices */
   gstin: string;
   dl_no: string;

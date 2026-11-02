@@ -651,6 +651,9 @@ export const submitBill = (payload: {
       gst_percent: line.gst_percent,
       cost_per_unit: 0,
       returned_qty: 0,
+      auto_category: "",
+      auto_percent: 0,
+      auto_discount: 0,
     }));
 
     // Deduct stock from the exact batch that was billed
@@ -689,6 +692,8 @@ export const submitBill = (payload: {
       due_amount: 0,
       due_date: null,
       returned_amount: 0,
+      auto_discount: 0,
+      auto_slab: "",
       shipping_address: "",
       customer_gstin: "",
       items,

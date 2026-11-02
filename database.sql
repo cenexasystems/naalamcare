@@ -501,3 +501,16 @@ ALTER TABLE "settings" ADD COLUMN IF NOT EXISTS "purchase_units" text DEFAULT ''
 
 ALTER TABLE "customers" ADD COLUMN IF NOT EXISTS "contact_person" text DEFAULT '' NOT NULL;
 ALTER TABLE "customers" ADD COLUMN IF NOT EXISTS "dl_no" text DEFAULT '' NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 17. Automatic category-wise discounts by bill slab (retail)
+--     Config per dashboard (JSON); every bill and bill line keeps what it was
+--     charged, so later settings changes never alter old invoices.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "mode_settings" ADD COLUMN IF NOT EXISTS "auto_discounts" text DEFAULT '' NOT NULL;
+ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "auto_discount" numeric(12, 2) DEFAULT '0' NOT NULL;
+ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "auto_slab" text DEFAULT '' NOT NULL;
+ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "auto_category" text DEFAULT '' NOT NULL;
+ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "auto_percent" numeric(5, 2) DEFAULT '0' NOT NULL;
+ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "auto_discount" numeric(12, 2) DEFAULT '0' NOT NULL;

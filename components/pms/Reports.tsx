@@ -61,17 +61,20 @@ export const Reports = ({
   const totals = useMemo(() => {
     let revenue = 0;
     let discount = 0;
+    let autoDiscount = 0;
     let gst = 0;
     let units = 0;
     for (const bill of filtered) {
       revenue += bill.grand_total;
       discount += bill.discount;
+      autoDiscount += bill.auto_discount;
       gst += bill.gst_amount;
       units += bill.items.reduce((sum, i) => sum + i.qty, 0);
     }
     return {
       revenue: round2(revenue),
       discount: round2(discount),
+      autoDiscount: round2(autoDiscount),
       gst: round2(gst),
       units,
       bills: filtered.length,
@@ -211,6 +214,9 @@ export const Reports = ({
         <StatTile icon={<FileSpreadsheet className="h-5 w-5" />} label="Bills" value={totals.bills} tone="blue" />
         <StatTile icon={<span className="text-[17px] font-bold">#</span>} label="Units Sold" value={totals.units} tone="gray" />
         <StatTile icon={<span className="text-[17px] font-bold">%</span>} label="Discount Given" value={money(totals.discount)} tone="amber" />
+        {totals.autoDiscount > 0 && (
+          <StatTile icon={<span className="text-[17px] font-bold">%</span>} label="Automatic Discount" value={money(totals.autoDiscount)} tone="amber" />
+        )}
         <StatTile icon={<span className="text-[13px] font-bold">GST</span>} label="GST (included)" value={money(totals.gst)} tone="gray" />
       </div>
 
@@ -370,6 +376,9 @@ export const Reports = ({
             <div className="mt-4 ml-auto w-full max-w-[320px] space-y-2 text-[13px]">
               <SummaryRow label="Sub Total" value={money(viewing.sub_total)} />
               <SummaryRow label="Discount" value={money(viewing.discount)} />
+              {viewing.auto_discount > 0 && (
+                <SummaryRow label={`of which automatic${viewing.auto_slab ? ` · ${viewing.auto_slab}` : ""}`} value={money(viewing.auto_discount)} />
+              )}
               <SummaryRow label="Taxable Amount" value={money(viewing.taxable_amount)} />
               <SummaryRow label={`GST (${viewing.gst_percent}%)`} value={money(viewing.gst_amount)} />
               <div className="flex items-center justify-between border-t border-[#eef1f3] pt-2.5">

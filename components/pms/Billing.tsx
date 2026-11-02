@@ -19,8 +19,8 @@ import {
   Undo2,
 } from "lucide-react";
 import type { Batch, Bill, CartLine, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
-import { calcBillOffer, calcBillTotals, calcDiscountPercent, round2 } from "@/lib/calc";
-import { calcTypeDiscounts } from "@/lib/type-discounts";
+import { calcBillOffer, calcBillTotals, calcDiscountPercent, calcIncludedGst, round2 } from "@/lib/calc";
+import { calcAutoDiscounts, slabRange } from "@/lib/auto-discounts";
 import { amount, money, monthShort, sellByOptions, stockBreakdown, unitNoun, todayIso, type SellBy } from "@/lib/format";
 import { listHeldBills, saveHeldBills } from "@/lib/store";
 import { submitBill } from "@/lib/actions";
@@ -247,18 +247,34 @@ export const Billing = ({
 
   /* ------------------------------- totals -------------------------------- */
   const totals = useMemo(() => calcBillTotals(lines), [lines]);
-  // Same order as the server: product-type discounts, then the bill offer, then the counter discount.
-  const typeDiscount = calcTypeDiscounts(
-    settings?.mode_settings.type_discounts ?? [],
-    lines.map((l) => ({ product_type: l.product_type, amount: round2(l.per_unit_price * l.qty) })),
+  // Same order and rules as the server: the automatic category-wise slab discount (line by line),
+  // then bill offers (only while automatic discounts are off), then the counter's manual discount.
+  const autoConfig = settings?.mode_settings.auto_discounts;
+  const auto = useMemo(
+    () =>
+      autoConfig
+        ? calcAutoDiscounts(autoConfig, lines.map((l) => ({ product_type: l.product_type, amount: round2(l.per_unit_price * l.qty) })))
+        : null,
+    [autoConfig, lines],
   );
-  const afterType = round2(totals.grandTotal - typeDiscount.total);
-  const billOffer = calcBillOffer(settings?.mode_settings.bill_offers ?? [], afterType);
+  const autoTotal = auto?.total ?? 0;
+  const afterType = round2(totals.grandTotal - autoTotal);
+  const billOffer = calcBillOffer(autoConfig?.enabled ? [] : (settings?.mode_settings.bill_offers ?? []), afterType);
   const afterOffer = round2(afterType - billOffer.discount);
-  const extraDiscount = Math.min(
-    afterOffer,
-    extra.kind === "percent" ? round2((afterOffer * Math.min(100, extra.value)) / 100) : extra.value,
+  /** Manual discount switched off while an automatic discount applies (Settings) */
+  const manualBlocked = autoTotal > 0 && autoConfig?.allow_manual === false;
+  /** The next bigger slab and how much more the bill needs to reach it */
+  const nextSlab = useMemo(() => {
+    if (!autoConfig?.enabled || !auto || !lines.length) return null;
+    const up = autoConfig.slabs.find((s) => s.enabled && s.min > auto.subtotal);
+    return up ? { slab: up, shortBy: round2(up.min - auto.subtotal) } : null;
+  }, [autoConfig, auto, lines.length]);
+  const gstAfterAuto = round2(
+    lines.reduce((s, l, i) => s + calcIncludedGst(auto?.lines[i]?.net ?? l.per_unit_price * l.qty, l.gst_percent), 0),
   );
+  const extraDiscount = manualBlocked
+    ? 0
+    : Math.min(afterOffer, extra.kind === "percent" ? round2((afterOffer * Math.min(100, extra.value)) / 100) : extra.value);
   const payable = round2(Math.max(0, afterOffer - extraDiscount));
   const receivedNum = Number(received) || 0;
   const change = round2(Math.max(0, receivedNum - payable));
@@ -713,11 +729,11 @@ export const Billing = ({
           </div>
 
           <div className="flex-1 overflow-x-auto">
-            <table className="w-full min-w-[360px]">
+            <table className="w-full min-w-[560px]">
               <thead>
                 <tr className="bg-[#fafbfc] text-gray-600">
                   <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold">#</th>
-                  <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold">Type</th>
+                  <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold">Category</th>
                   <th className="px-1.5 py-2.5 text-left text-[11px] font-semibold">Product</th>
                   <th className="px-1.5 py-2.5 text-center text-[11px] font-semibold">Box</th>
                   <th className="px-1.5 py-2.5 text-center text-[11px] font-semibold">Quantity</th>
@@ -726,11 +742,9 @@ export const Billing = ({
                     <br />
                     price
                   </th>
-                  <th className="px-1.5 py-2.5 text-right text-[11px] font-semibold leading-tight">
-                    Selling
-                    <br />
-                    price (₹)
-                  </th>
+                  <th className="px-1.5 py-2.5 text-right text-[11px] font-semibold">Amount</th>
+                  <th className="px-1.5 py-2.5 text-right text-[11px] font-semibold">Disc</th>
+                  <th className="px-1.5 py-2.5 text-right text-[11px] font-semibold">Net (₹)</th>
                   <th className="px-1.5 py-2.5" />
                 </tr>
               </thead>
@@ -738,7 +752,7 @@ export const Billing = ({
                 {lines.map((line, index) => (
                   <tr key={line.key} className="align-middle">
                     <td className="px-1.5 py-3 text-[12px] text-gray-500">{index + 1}</td>
-                    <td className="px-1.5 py-3 text-[11.5px] font-medium text-gray-700">{line.product_type || line.purchase_unit_type || "—"}</td>
+                    <td className="px-1.5 py-3 text-[11.5px] font-medium text-gray-700">{auto?.lines[index]?.category || line.product_type || "—"}</td>
                     <td className="px-1.5 py-3">
                       <p className="text-[12.5px] font-semibold leading-tight text-gray-900">
                         {line.generic_name}
@@ -766,8 +780,22 @@ export const Billing = ({
                     <td className="px-1.5 py-3 text-right text-[12.5px] font-semibold text-gray-800">
                       {amount(line.per_unit_price)}
                     </td>
-                    <td className="px-1.5 py-3 text-right text-[12.5px] font-bold text-gray-900">
+                    <td className="px-1.5 py-3 text-right text-[12.5px] font-semibold text-gray-800">
                       {amount(round2(line.per_unit_price * line.qty))}
+                    </td>
+                    <td className="px-1.5 py-3 text-right text-[11.5px] font-semibold text-[var(--c-deep)]">
+                      {auto?.lines[index]?.discount ? (
+                        <>
+                          {auto.lines[index].percent}%
+                          <br />
+                          −{amount(auto.lines[index].discount)}
+                        </>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-1.5 py-3 text-right text-[12.5px] font-bold text-gray-900">
+                      {amount(auto?.lines[index]?.net ?? round2(line.per_unit_price * line.qty))}
                     </td>
                     <td className="px-1.5 py-3 text-right">
                       <button
@@ -782,7 +810,7 @@ export const Billing = ({
                 ))}
                 {!lines.length && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-14 text-center text-[13px] text-gray-400">
+                    <td colSpan={10} className="px-4 py-14 text-center text-[13px] text-gray-400">
                       No items yet — search a medicine and press ADD TO BILL (F5)
                     </td>
                   </tr>
@@ -801,13 +829,16 @@ export const Billing = ({
             <div className="relative">
               <button
                 onClick={() => {
+                  if (manualBlocked) return setNotice("Manual discount is off while an automatic discount applies (Settings → Automatic Discounts).");
                   setDiscountDraft(extra.value ? String(extra.value) : "");
                   setDiscountKind(extra.value ? extra.kind : "amount");
                   setShowDiscountBox((v) => !v);
                 }}
-                className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-[#e3e7ea] py-2.5 text-[13px] font-semibold text-gray-700 transition hover:bg-gray-50"
+                className={`flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-[#e3e7ea] py-2.5 text-[13px] font-semibold transition hover:bg-gray-50 ${
+                  manualBlocked ? "text-gray-400" : "text-gray-700"
+                }`}
               >
-                <Percent className="h-4 w-4 text-gray-500" /> Apply Discount
+                <Percent className="h-4 w-4 text-gray-500" /> {manualBlocked ? "Manual Discount Off" : "Manual Discount"}
               </button>
               {showDiscountBox && (
                 <div className="absolute bottom-[52px] left-0 right-0 z-30 rounded-xl border border-[#e5e7eb] bg-white p-3.5 shadow-xl sm:left-auto sm:right-0 sm:w-[260px]">
@@ -815,7 +846,7 @@ export const Billing = ({
                     <Info className="mt-[1px] h-3.5 w-3.5 shrink-0 text-[#1f6feb]" />
                     MRP-to-selling discount of {money(totals.discount)} is already applied
                     automatically
-                    {typeDiscount.total > 0 ? `, plus ${money(typeDiscount.total)} product-type discount` : ""}
+                    {autoTotal > 0 ? `, plus ${money(autoTotal)} automatic category discount` : ""}
                     {billOffer.offer ? `, plus the ${billOffer.offer.percent}% bill offer (${money(billOffer.discount)})` : ""}.
                     Add an extra discount below if needed.
                   </p>
@@ -888,15 +919,45 @@ export const Billing = ({
           </h3>
 
           <div className="space-y-2.5 text-[13px]">
-            <Row label={`Sub Total (${totals.itemCount} Items)`} value={money(totals.subTotal)} />
-            {typeDiscount.parts.map((p) => (
-              <Row
-                key={p.type}
-                label={`${p.type} discount (${p.percent}% on ${money(p.subtotal)})`}
-                value={`− ${money(p.discount)}`}
-                tone="green"
-              />
-            ))}
+            <Row label={`Sub Total at MRP (${totals.itemCount} Items)`} value={money(totals.subTotal)} />
+            {totals.discount > 0 && <Row label="MRP to selling price" value={`− ${money(totals.discount)}`} tone="green" />}
+            <Row label="Bill amount (before auto discount)" value={money(totals.grandTotal)} />
+          </div>
+
+          <div className="mt-3 rounded-lg border border-[#e3e7ea] bg-[#fafbfc] px-3 py-2.5 text-[12.5px]">
+            <p className="mb-1.5 flex items-center justify-between gap-2 font-bold text-gray-900">
+              Automatic discount
+              {auto?.slab && autoConfig?.enabled && lines.length > 0 && (
+                <span className="rounded-md bg-[var(--c-mint)] px-2 py-0.5 text-[11px] font-bold text-[var(--c-deep)]">
+                  {auto.slab.name} · {slabRange(auto.slab)}
+                </span>
+              )}
+            </p>
+            {!autoConfig?.enabled ? (
+              <p className="text-[11.5px] text-gray-500">Switched off for this dashboard (Settings → Automatic Discounts).</p>
+            ) : !lines.length ? (
+              <p className="text-[11.5px] text-gray-500">Applies as soon as items are added.</p>
+            ) : auto?.inactive === "slab-off" ? (
+              <p className="text-[11.5px] text-gray-500">{auto.slab?.name} is switched off — no automatic discount.</p>
+            ) : (
+              <div className="space-y-1">
+                {(auto?.byCategory ?? []).map((g) => (
+                  <Row key={g.category} label={`${g.category} (${g.percent}%)`} value={`− ${money(g.discount)}`} tone="green" />
+                ))}
+                {!auto?.byCategory.length && <p className="text-[11.5px] text-gray-500">No discount for these items in this slab.</p>}
+                <div className="border-t border-[#e3e7ea] pt-1">
+                  <Row label="Total automatic discount" value={`− ${money(autoTotal)}`} tone={autoTotal > 0 ? "green" : undefined} />
+                </div>
+              </div>
+            )}
+            {nextSlab && (
+              <p className="mt-1.5 text-[11.5px] font-medium text-[var(--c-deep)]">
+                Add {money(nextSlab.shortBy)} more to reach {nextSlab.slab.name}.
+              </p>
+            )}
+          </div>
+
+          <div className="mt-3 space-y-2.5 text-[13px]">
             {billOffer.offer && (
               <Row
                 label={`Bill offer (${billOffer.offer.percent}%${billOffer.offer.min_amount > 0 ? ` on ₹${amount(billOffer.offer.min_amount)}+` : ""})`}
@@ -911,8 +972,8 @@ export const Billing = ({
                 tone="green"
               />
             )}
-            <Row label="Taxable Amount" value={money(totals.taxableAmount)} />
-            <Row label={`GST (${totals.gstPercent || 0}%)`} value={money(totals.gstAmount)} />
+            <Row label="Taxable Amount" value={money(round2(afterType - gstAfterAuto))} />
+            <Row label="GST (included)" value={money(gstAfterAuto)} />
           </div>
           {billOffer.next && (
             <p className="mt-3 rounded-lg bg-[var(--c-mint)] px-3 py-2 text-[11.5px] font-medium text-[var(--c-deep)]">

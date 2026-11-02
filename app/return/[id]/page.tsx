@@ -5,6 +5,7 @@ import { APP_NAME } from "@/lib/mode";
 import { amount, amountInWords, dateSlash, money } from "@/lib/format";
 import { InvoiceFit } from "../../invoice/[id]/InvoiceFit";
 import { PrintButton } from "./PrintButton";
+import { formatReturnNo } from "@/lib/ids";
 
 /* ==========================================================================
    Sales Return bill (credit note) — one per return saved from
@@ -12,8 +13,7 @@ import { PrintButton } from "./PrintButton";
    what came back, its value, and how it was settled (refund / set off).
    ========================================================================== */
 
-/** Short printable number for a return, e.g. "R-3F2A9C1B". */
-const returnNo = (id: string) => `R-${id.replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+const returnNo = formatReturnNo;
 
 export default async function ReturnBillPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -59,7 +59,7 @@ export default async function ReturnBillPage({ params }: { params: Promise<{ id:
           href={`/invoice/${encodeURIComponent(bill.id)}`}
           className="flex items-center rounded-lg border border-[var(--c-deep)]/30 bg-white px-4 py-2 text-xs font-bold uppercase tracking-wider text-[#1a1d21] shadow-sm hover:bg-[#FAFAFA]"
         >
-          View revised invoice {bill.id}
+          View original invoice {bill.id}
         </Link>
         <PrintButton />
       </div>
@@ -167,7 +167,7 @@ export default async function ReturnBillPage({ params }: { params: Promise<{ id:
                   <td className={`${cell} text-right`}>{amount(ret.refund_amount)}</td>
                 </tr>
                 <tr>
-                  <td className={`${cell} font-bold`}>Revised Invoice Amount</td>
+                  <td className={`${cell} font-bold`}>Net After All Returns</td>
                   <td className={`${cell} text-right font-bold`}>{amount(revisedTotal)}</td>
                 </tr>
               </tbody>

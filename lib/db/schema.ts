@@ -175,6 +175,9 @@ export const bills = pgTable(
     dueDate: date("due_date"),
     /** Value of goods returned against this bill. */
     returnedAmount: numeric("returned_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+    /** Automatic category-wise discount on this bill, and the slab that chose it (snapshot) */
+    autoDiscount: numeric("auto_discount", { precision: 12, scale: 2 }).notNull().default("0"),
+    autoSlab: text("auto_slab").notNull().default(""),
     shippingAddress: text("shipping_address").notNull().default(""),
     customerGstin: text("customer_gstin").notNull().default(""),
     /** Idempotency key from the billing screen — a double-submit returns the first bill. */
@@ -221,6 +224,10 @@ export const billItems = pgTable(
     costPerUnit: numeric("cost_per_unit", { precision: 12, scale: 2 }).notNull().default("0"),
     /** Units already returned against this line. */
     returnedQty: integer("returned_qty").notNull().default(0),
+    /** Automatic discount on this line: category, % and ₹ as billed (snapshot) */
+    autoCategory: text("auto_category").notNull().default(""),
+    autoPercent: numeric("auto_percent", { precision: 5, scale: 2 }).notNull().default("0"),
+    autoDiscount: numeric("auto_discount", { precision: 12, scale: 2 }).notNull().default("0"),
   },
   (table) => [index("bill_items_bill_idx").on(table.billId)],
 );
@@ -277,6 +284,8 @@ export const modeSettings = pgTable("mode_settings", {
   invoicePromo: text("invoice_promo").notNull().default(""),
   /** JSON: automatic discounts by product type (see lib/type-discounts.ts) */
   typeDiscounts: text("type_discounts").notNull().default("[]"),
+  /** JSON: automatic category-wise discounts by bill slab (lib/auto-discounts.ts); "" = not set up */
+  autoDiscounts: text("auto_discounts").notNull().default(""),
   /** GSTIN and drug licence number printed on this mode's invoices. */
   gstin: text("gstin").notNull().default(""),
   dlNo: text("dl_no").notNull().default(""),

@@ -4,7 +4,8 @@ import { billShareToken, getSession, isValidBillShareToken } from "@/lib/auth";
 import { APP_NAME } from "@/lib/mode";
 import { amount, amountInWords, dateSlash, monthShort, money, themeTokens } from "@/lib/format";
 import type { Bill, BillItem } from "@/lib/types";
-import { lineTypePercents, type TypeDiscountRule } from "@/lib/type-discounts";
+import { billLineNets } from "@/lib/auto-discounts";
+import { formatReturnNo } from "@/lib/ids";
 import { InvoiceActions } from "./InvoiceActions";
 import { InvoiceFit } from "./InvoiceFit";
 import { InvoicePromoPopup } from "@/components/pms/InvoicePromoPopup";
@@ -36,27 +37,16 @@ const mfrLabel = (item: BillItem): string => {
 };
 
 /**
- * What each line actually cost the customer, after every discount. The product-type discount
- * (Tablet 10%, General 5%…) is taken off each line at its own rate; the bill-wide offer and the
- * counter discount are then shared across lines so they add up exactly to the bill total.
+ * Disc % on a line: the automatic category discount it was billed at (saved on the bill, so later
+ * settings changes never alter it). Bills without one show the total saving against MRP instead.
  */
-const netLineAmounts = (bill: Bill, rules: TypeDiscountRule[]): number[] => {
-  const lines = bill.items.map((i) => ({ product_type: i.product_type, amount: Number(i.line_amount) || 0 }));
-  const pcts = lineTypePercents(rules, lines);
-  const afterType = lines.map((l, i) => l.amount * (1 - pcts[i] / 100));
-  const sum = afterType.reduce((s, x) => s + x, 0);
-  const factor = sum > 0 ? bill.grand_total / sum : 1;
-  return afterType.map((x) => x * factor);
-};
-
-/** Total discount on the line as a % of its MRP: MRP-to-selling plus the bill's offers / counter discount. */
 const discPercent = (item: BillItem, net: number): number =>
-  item.line_mrp > 0 ? Math.max(0, ((item.line_mrp - net) / item.line_mrp) * 100) : 0;
+  item.auto_percent > 0
+    ? item.auto_percent
+    : item.line_mrp > 0
+      ? Math.max(0, ((item.line_mrp - net) / item.line_mrp) * 100)
+      : 0;
 
-
-/** Selling-price total of the lines, before any counter discount. */
-const linesTotal = (bill: Bill): number =>
-  bill.items.reduce((sum, i) => sum + (Number(i.line_amount) || 0), 0);
 
 const totalQty = (bill: Bill): number => bill.items.reduce((sum, i) => sum + (Number(i.qty) || 0), 0);
 
@@ -105,10 +95,10 @@ export default async function InvoicePage({
   const shopWide = await getSettings();
   const shop = shopWide && modeSettings ? applyModeShopDetails(shopWide, modeSettings) : shopWide;
   const wholesale = bill?.mode === "wholesale";
-  const netAmounts = bill ? netLineAmounts(bill, modeSettings?.type_discounts ?? []) : [];
-  // Returns change what the customer finally paid: the invoice lists them and shows the revised total.
+  // What each line actually cost: its saved automatic discount off, bill-wide discounts shared out.
+  const netAmounts = bill ? billLineNets(bill) : [];
+  // Returns get their own return invoice; this one stays exactly as billed. Staff see links to them.
   const returns = bill && bill.returned_amount > 0 ? await getBillReturns(bill.id) : [];
-  const revisedTotal = bill ? Math.max(0, bill.grand_total - bill.returned_amount) : 0;
   /** MRP value of everything on the bill minus what the customer paid: every discount together. */
   const savedAmount = bill ? Math.max(0, Math.round((bill.sub_total - bill.grand_total) * 100) / 100) : 0;
   const terms = (modeSettings?.invoice_terms || "")
@@ -172,7 +162,7 @@ export default async function InvoicePage({
           sharePath={sharePath}
           canShare={!sharedView}
           phone={bill.customer_phone}
-          message={`${shop?.shop_name || APP_NAME} — Invoice ${bill.id} dated ${dateSlash(bill.bill_date)}, amount ${money(revisedTotal)}.`}
+          message={`${shop?.shop_name || APP_NAME} — Invoice ${bill.id} dated ${dateSlash(bill.bill_date)}, amount ${money(bill.grand_total)}.`}
         />
       </div>
 
@@ -183,6 +173,17 @@ export default async function InvoicePage({
           shopName={shop?.shop_name || APP_NAME}
           appColor={themeTokens(shopWide?.colour_theme).deep}
         />
+      )}
+      {!sharedView && returns.length > 0 && (
+        <div className="no-print mb-3 w-full max-w-3xl rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900 print:hidden">
+          Items on this bill were returned ({money(bill.returned_amount)}). This invoice shows the original sale; the return has its own
+          invoice:{" "}
+          {returns.map((r) => (
+            <Link key={r.id} href={`/return/${r.id}`} className="mr-3 font-bold text-[#1f6feb] underline">
+              {formatReturnNo(r.id)} ({money(r.amount)})
+            </Link>
+          ))}
+        </div>
       )}
       <InvoiceFit>
       {/* A full A4 page: at least 297mm tall on screen (281mm inside the 8mm print margins); the item grid stretches to fill it. */}
@@ -284,48 +285,6 @@ export default async function InvoicePage({
         </table>
         </div>
 
-        {/* ---------- Returns against this bill ---------- */}
-        {returns.length > 0 && (
-          <div className="inv-break mt-1 border border-black text-[9.5px]">
-            <p className="bg-[#d9d9d9] px-1 py-0.5 font-bold">Returns</p>
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  {["Date", "Product Name", "Batch", "Qty Returned", "Amount", "Refund"].map((h) => (
-                    <th key={h} className="border border-black px-1 py-0.5 text-center font-bold">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {returns.flatMap((r) =>
-                  r.items.map((it, n) => (
-                    <tr key={`${r.id}-${n}`}>
-                      <td className="border border-black px-1 py-0.5 text-center">{dateSlash(r.created_at.slice(0, 10))}</td>
-                      <td className="border border-black px-1 py-0.5 font-bold uppercase">{it.generic_name}</td>
-                      <td className="border border-black px-1 py-0.5 text-center">{it.batch_no}</td>
-                      <td className="border border-black px-1 py-0.5 text-right">{it.qty}</td>
-                      <td className="border border-black px-1 py-0.5 text-right">{amount(it.amount)}</td>
-                      <td className="border border-black px-1 py-0.5 text-center">
-                        {n === 0 ? (r.refund_amount > 0 ? `${amount(r.refund_amount)} ${r.refund_method}` : "Adjusted in due") : ""}
-                      </td>
-                    </tr>
-                  )),
-                )}
-              </tbody>
-            </table>
-            {!sharedView && (
-              <p className="no-print border-t border-black px-1 py-1 print:hidden">
-                Return bills:{" "}
-                {returns.map((r) => (
-                  <Link key={r.id} href={`/return/${r.id}`} className="mr-3 font-bold text-[#1f6feb] underline">
-                    R-{r.id.replace(/-/g, "").slice(0, 8).toUpperCase()}
-                  </Link>
-                ))}
-              </p>
-            )}
-          </div>
-        )}
-
         {/* ---------- Totals + GST breakup ---------- */}
         <div className="inv-break mt-1 flex items-stretch text-[9.5px]">
           <div className="w-[38%] border border-black p-1">
@@ -367,18 +326,6 @@ export default async function InvoicePage({
                     <td className="border border-black px-1 py-0.5 font-bold">You Saved (vs MRP)</td>
                     <td className="border border-black px-1 py-0.5 text-right font-bold">{amount(savedAmount)}</td>
                   </tr>
-                )}
-                {bill.returned_amount > 0 && (
-                  <>
-                    <tr>
-                      <td className="border border-black px-1 py-0.5">Less: Returns</td>
-                      <td className="border border-black px-1 py-0.5 text-right">−{amount(bill.returned_amount)}</td>
-                    </tr>
-                    <tr>
-                      <td className="border border-black px-1 py-0.5 font-bold">Revised Net Amount</td>
-                      <td className="border border-black px-1 py-0.5 text-right font-bold">{amount(revisedTotal)}</td>
-                    </tr>
-                  </>
                 )}
                 {bill.due_amount > 0 && (
                   <tr>
@@ -432,15 +379,10 @@ export default async function InvoicePage({
           )}
           <div className="flex items-center justify-between border-t border-black px-1 py-0.5">
             <span>Due bills :</span>
-            <span className="font-bold">{bill.returned_amount > 0 ? "Revised Net Amount" : "Net Amount"}</span>
+            <span className="font-bold">Net Amount</span>
           </div>
           <div className="flex items-center justify-end gap-3 px-1 py-1">
-            {bill.returned_amount > 0 && (
-              <span className="text-[10px] text-gray-700">
-                {money(bill.grand_total)} − returns {money(bill.returned_amount)} =
-              </span>
-            )}
-            <span className="text-[17px] font-bold">{money(revisedTotal)}</span>
+            <span className="text-[17px] font-bold">{money(bill.grand_total)}</span>
           </div>
         </div>
 
@@ -451,7 +393,7 @@ export default async function InvoicePage({
         )}
 
         {/* ---------- Amount in words ---------- */}
-        <p className="mt-1 text-[9.5px] uppercase">{amountInWords(revisedTotal)}</p>
+        <p className="mt-1 text-[9.5px] uppercase">{amountInWords(bill.grand_total)}</p>
 
         {/* ---------- Terms + signature ---------- */}
         <div className="inv-break mt-2 flex items-end justify-between gap-6 text-[9px] leading-[1.4]">

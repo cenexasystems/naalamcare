@@ -5,6 +5,8 @@ import { Search, Printer, Undo2, IndianRupee, FileText, AlertTriangle, Wallet } 
 import type { Bill, Customer, LedgerData } from "@/lib/types";
 import { amount, dateSlash, money, todayIso } from "@/lib/format";
 import { round2 } from "@/lib/calc";
+import { unitPaidOf } from "@/lib/auto-discounts";
+import { formatReturnNo } from "@/lib/ids";
 import { createSalesReturn, recordCustomerPayment } from "@/lib/actions";
 import { Button, Card, Field, Modal, PageTitle, Pill, Select, StatTile, TextInput } from "./ui";
 import { act, useMode } from "./mode-context";
@@ -282,18 +284,21 @@ export const Payments = ({
               <thead>
                 <tr className="bg-[#f4f6f8] text-gray-700">
                   <th className="th">Date</th>
-                  <th className="th">Invoice</th>
+                  <th className="th">Return No</th>
+                  <th className="th">Against Invoice</th>
                   <th className="th">Items</th>
                   <th className="th text-right">Value</th>
                   <th className="th text-right">Set off against due</th>
                   <th className="th text-right">Refunded</th>
                   <th className="th">Reason</th>
+                  <th className="th" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#f1f3f5]">
                 {(ledger?.salesReturns ?? []).map((r) => (
                   <tr key={r.id}>
                     <td className="td">{dateSlash(r.created_at.slice(0, 10))}</td>
+                    <td className="td font-semibold text-[#b45309]">{formatReturnNo(r.id)}</td>
                     <td className="td font-semibold">{r.bill_id}</td>
                     <td className="td text-[12.5px] text-gray-600">
                       {r.items.map((i) => `${i.generic_name} × ${i.qty}`).join(", ")}
@@ -304,11 +309,27 @@ export const Payments = ({
                       {amount(r.refund_amount)} <span className="text-[11px] text-gray-500">{r.refund_method}</span>
                     </td>
                     <td className="td text-[12.5px] text-gray-600">{r.reason || "—"}</td>
+                    <td className="td">
+                      <div className="flex justify-end gap-1.5">
+                        <button
+                          onClick={() => window.open(`/return/${r.id}`, "_blank")}
+                          className="cursor-pointer whitespace-nowrap rounded-md border border-[#d8dde3] px-2.5 py-1 text-[12px] font-semibold text-[#b45309] hover:bg-gray-50"
+                        >
+                          Return bill
+                        </button>
+                        <button
+                          onClick={() => window.open(`/invoice/${encodeURIComponent(r.bill_id)}`, "_blank")}
+                          className="cursor-pointer whitespace-nowrap rounded-md border border-[#d8dde3] px-2.5 py-1 text-[12px] font-semibold text-[var(--c-deep)] hover:bg-gray-50"
+                        >
+                          Original invoice
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {!(ledger?.salesReturns ?? []).length && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-16 text-center text-[13.5px] text-gray-400">
+                    <td colSpan={9} className="px-4 py-16 text-center text-[13.5px] text-gray-400">
                       No returns recorded.
                     </td>
                   </tr>
@@ -421,10 +442,10 @@ export const ReturnModal = ({
   const [saving, setSaving] = useState(false);
   if (!bill) return null;
 
-  const linesTotal = bill.items.reduce((s, i) => s + i.line_amount, 0);
-  const factor = linesTotal > 0 ? bill.grand_total / linesTotal : 1;
+  // What a unit of each line actually cost: its automatic discount off, bill-wide discounts shared out.
+  const paid = unitPaidOf(bill);
   const value = round2(
-    bill.items.reduce((s, i) => s + i.per_unit_price * (Math.floor(Number(qty[i.id]) || 0)) * factor, 0),
+    bill.items.reduce((s, i) => s + paid(i) * (Math.floor(Number(qty[i.id]) || 0)), 0),
   );
   const setOff = Math.min(bill.due_amount, value);
 
@@ -494,9 +515,9 @@ export const ReturnModal = ({
                     {i.product_type && <p className="text-[11px] text-gray-500">{i.product_type}</p>}
                   </td>
                   <td className="td">{i.batch_no}</td>
-                  <td className="td text-right">{amount(round2(i.per_unit_price * factor))}</td>
+                  <td className="td text-right">{amount(round2(paid(i)))}</td>
                   <td className="td text-right">{i.qty}</td>
-                  <td className="td text-right font-semibold">{amount(round2(i.line_amount * factor))}</td>
+                  <td className="td text-right font-semibold">{amount(round2(paid(i) * i.qty))}</td>
                   <td className="td text-right">{i.returned_qty || "—"}</td>
                   <td className="td text-right">
                     <input
@@ -512,7 +533,7 @@ export const ReturnModal = ({
                     />
                   </td>
                   <td className="td text-right font-semibold text-[var(--c-deep)]">
-                    {now > 0 ? amount(round2(i.per_unit_price * now * factor)) : "—"}
+                    {now > 0 ? amount(round2(paid(i) * now)) : "—"}
                   </td>
                 </tr>
               );
