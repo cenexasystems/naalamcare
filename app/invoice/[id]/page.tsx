@@ -280,7 +280,7 @@ export default async function InvoicePage({
                 <td className="border border-black px-1 py-0.5 text-center">{monthShort(item.exp_date)}</td>
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{amount(item.mrp_per_unit)}</td>
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{item.qty}</td>
-                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{amount(item.per_unit_price)}</td>
+                <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right">{/* Retail: price × qty, before the discount (Rate − Disc % = Amount). Wholesale keeps the per-unit rate. */}{amount(wholesale ? item.per_unit_price : item.line_amount)}</td>
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-center">{item.is_free ? "FREE" : `${discPercent(item, netAmounts[index]).toFixed(2)}%`}</td>
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-center">{amount(item.gst_percent)}</td>
                 <td className="whitespace-nowrap border border-black px-1 py-0.5 text-right font-bold">{amount(netAmounts[index])}</td>
