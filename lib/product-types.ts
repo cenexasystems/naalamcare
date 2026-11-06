@@ -1,7 +1,7 @@
 /* Shop-wide pick lists edited in Settings and shared by retail and wholesale. */
 
 /** Product types offered for medicines (Settings → Product Types). */
-export const DEFAULT_PRODUCT_TYPES = ["Tablet", "Injection", "General", "Cartridge", "Bottle", "Box"];
+export const DEFAULT_PRODUCT_TYPES = ["Tablet", "Injection", "General", "Liquid", "Cartridge", "Bottle", "Box"];
 
 /** Purchase units a batch can be bought in (Settings → Purchase Units). */
 export const DEFAULT_PURCHASE_UNITS = ["Strip", "Piece", "Bottle", "Cartridge"];
@@ -26,6 +26,21 @@ export const parseNameList = (raw: unknown, defaults: string[]): string[] => {
 
 export const parseProductTypes = (raw: unknown): string[] => parseNameList(raw, DEFAULT_PRODUCT_TYPES);
 export const parsePurchaseUnits = (raw: unknown): string[] => parseNameList(raw, DEFAULT_PURCHASE_UNITS);
+
+/** Product types always bought and sold as single pieces (the General item behaviour). */
+const PIECE_PRODUCT_TYPES = ["general", "liquid", "bottle", "cartridge"];
+export const isPieceProductType = (productType?: string): boolean =>
+  PIECE_PRODUCT_TYPES.includes((productType || "").trim().toLowerCase());
+
+/**
+ * Single-item products: one piece per pack, no boxes, so quantity = stock. Returns the pack type to
+ * store, or null when the product keeps pack sizes (Tablets and everything else). Applies to new
+ * stock only — existing batches keep the pack size their prices and quantities were saved with.
+ */
+export const singleItemUnit = (productType?: string, unitType?: string): string | null => {
+  if (isPieceProductType(productType)) return "Piece";
+  return unitType === "Bottle" || unitType === "Cartridge" ? unitType : null;
+};
 
 /** Options for a picker: the shop's list, plus the current value if it was since removed. */
 export const productTypeOptions = (types: string[], current: string): string[] =>

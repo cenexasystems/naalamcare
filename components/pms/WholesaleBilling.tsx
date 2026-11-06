@@ -566,7 +566,8 @@ export const WholesaleBilling = ({
                 <div className="mb-2 flex items-center justify-between">
                   <p className="text-[12.5px] font-medium text-gray-700">Quantity</p>
                   <div className="flex overflow-hidden rounded-md border border-[#dfe3e7] text-[11.5px] font-semibold">
-                    {(boxUnits ? (["box", "pack", "unit"] as const) : (["pack", "unit"] as const)).map((u) => (
+                    {/* A pack of one has no separate "loose unit" to choose. */}
+                    {[...(boxUnits ? (["box"] as const) : []), "pack" as const, ...(packSize > 1 ? (["unit"] as const) : [])].map((u) => (
                       <button
                         key={u}
                         onClick={() => setUnit(u)}

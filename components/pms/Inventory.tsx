@@ -28,8 +28,8 @@ import { act, useMode, useModeState } from "./mode-context";
 import { useReconciliation } from "./data";
 import { INVENTORY_SHEET } from "./exports";
 import { downloadCsv, downloadExcel } from "@/lib/xlsx";
-import { useSettings } from "./data";
-import { DEFAULT_PRODUCT_TYPES, DEFAULT_PURCHASE_UNITS, productTypeOptions } from "@/lib/product-types";
+import { useMedicines, useSettings } from "./data";
+import { DEFAULT_PRODUCT_TYPES, DEFAULT_PURCHASE_UNITS, isPieceProductType, productTypeOptions, singleItemUnit } from "@/lib/product-types";
 import { offerBadge, offerStatus, type Offer } from "@/lib/offers";
 import { playAlarmBeep } from "@/lib/alarm";
 import { Button, Card, Field, Modal, PageTitle, Pill, Select, StatTile, TextInput } from "./ui";
@@ -724,9 +724,13 @@ const EditBatchModal = ({
   const [draft, setDraft] = useState<Batch | null>(batch);
   const mode = useMode();
   const { data: settings } = useSettings();
+  const { data: catalogue } = useMedicines();
   if (!draft) return null;
 
   const set = (patch: Partial<Batch>) => setDraft({ ...draft, ...patch });
+  const singleItem = Boolean(
+    singleItemUnit(catalogue?.find((m) => m.id === draft.medicine_id)?.product_type, draft.purchase_unit_type),
+  );
 
   return (
     <Modal
@@ -786,20 +790,29 @@ const EditBatchModal = ({
             ))}
           </Select>
         </Field>
-        <Field label="Purchase Unit (units per pack)">
-          <TextInput
-            type="number"
-            value={draft.pack_size}
-            onChange={(e) => set({ pack_size: Number(e.target.value) || 0 })}
-          />
-        </Field>
-        <Field label={`${packNoun(draft.purchase_unit_type)} per box`} hint="Blank = not sold by the box">
-          <TextInput
-            type="number"
-            value={draft.strips_per_box || ""}
-            onChange={(e) => set({ strips_per_box: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
-          />
-        </Field>
+        {/* Single-item batches have no pack fields. Older batches saved with a pack size keep theirs, editable, never converted. */}
+        {singleItem && draft.pack_size <= 1 && !draft.strips_per_box ? (
+          <Field label="Pack">
+            <TextInput value="1 piece (General item)" disabled />
+          </Field>
+        ) : (
+          <>
+            <Field label="Purchase Unit (units per pack)">
+              <TextInput
+                type="number"
+                value={draft.pack_size}
+                onChange={(e) => set({ pack_size: Number(e.target.value) || 0 })}
+              />
+            </Field>
+            <Field label={`${packNoun(draft.purchase_unit_type)} per box`} hint="Blank = not sold by the box">
+              <TextInput
+                type="number"
+                value={draft.strips_per_box || ""}
+                onChange={(e) => set({ strips_per_box: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+              />
+            </Field>
+          </>
+        )}
         <Field label="Purchase Rate (₹)">
           <TextInput
             type="number"
@@ -901,7 +914,12 @@ const EditMedicineModal = ({
           </Select>
         </Field>
         <Field label="Product Type">
-          <Select value={draft.product_type} onChange={(e) => set({ product_type: e.target.value })}>
+          <Select
+            value={draft.product_type}
+            onChange={(e) =>
+              set({ product_type: e.target.value, ...(isPieceProductType(e.target.value) && { purchase_unit_type: "Piece" }) })
+            }
+          >
             <option value="">— Select —</option>
             {productTypeOptions(settings?.product_types ?? DEFAULT_PRODUCT_TYPES, draft.product_type).map((t) => (
               <option key={t} value={t}>
@@ -923,6 +941,7 @@ const EditMedicineModal = ({
         <Field label="Purchase Unit type">
           <Select
             value={draft.purchase_unit_type}
+            disabled={isPieceProductType(draft.product_type)}
             onChange={(e) => set({ purchase_unit_type: e.target.value as PurchaseUnitType })}
           >
             {productTypeOptions(settings?.purchase_units ?? DEFAULT_PURCHASE_UNITS, draft.purchase_unit_type).map((u) => (

@@ -12,7 +12,7 @@ import {
 } from "@/lib/calc";
 import { amount, monthShort, packNoun, todayIso, unitNoun } from "@/lib/format";
 import { useSettings } from "./data";
-import { DEFAULT_PRODUCT_TYPES, DEFAULT_PURCHASE_UNITS, productTypeOptions } from "@/lib/product-types";
+import { DEFAULT_PRODUCT_TYPES, DEFAULT_PURCHASE_UNITS, isPieceProductType, productTypeOptions, singleItemUnit } from "@/lib/product-types";
 import { saveBatch, saveMedicine, saveSupplier } from "@/lib/actions";
 import { Button, Card, Field, ScreenHeading, Select, TextInput } from "./ui";
 import { act, useMode } from "./mode-context";
@@ -23,9 +23,11 @@ export type { ReceiveDraft } from "./PurchaseExtras";
 /** Dropdown options requested by the client (slide 9 / 10) */
 const SCHEDULES: DrugSchedule[] = ["H", "H1", "X", "NRX", "OTC", "General"];
 
-/** General items (lotions, face wash…) are always sold whole: one piece per pack, no boxes. */
-const isSingleItem = (productType: string) => productType === "General";
-const SINGLE_ITEM = { purchaseUnitType: "Piece" as PurchaseUnitType, packSize: "1", stripsPerBox: "" };
+/** General items, liquids, bottles and cartridges are always sold whole: one piece per pack, no boxes. */
+const singleItemPatch = (productType: string, unitType: string) => {
+  const unit = singleItemUnit(productType, unitType);
+  return unit ? { purchaseUnitType: unit as PurchaseUnitType, packSize: "1", stripsPerBox: "" } : {};
+};
 
 const blankForm = (defaultGst = 12) => ({
   supplierId: "",
@@ -136,17 +138,18 @@ export const Purchase = ({
       box: last?.box || prev.box,
       packSize: last ? String(last.pack_size) : prev.packSize,
       stripsPerBox: last?.strips_per_box ? String(last.strips_per_box) : prev.stripsPerBox,
-      ...(isSingleItem(medicine.product_type) && SINGLE_ITEM),
+      ...singleItemPatch(medicine.product_type, medicine.purchase_unit_type),
     }));
     setShowResults(false);
   };
 
   /* --------------------------- auto calculations ------------------------- */
-  const singleItem = isSingleItem(form.productType);
+  const singleUnit = singleItemUnit(form.productType, form.purchaseUnitType);
+  const singleItem = singleUnit !== null;
   const packSize = singleItem ? 1 : Number(form.packSize) || 0;
   const stripsPerBox = singleItem ? 0 : Math.max(0, Math.floor(Number(form.stripsPerBox) || 0));
   const quantity = Number(form.quantity) || 0;
-  const packWord = packNoun(form.purchaseUnitType);
+  const packWord = singleItem ? "Pieces" : packNoun(form.purchaseUnitType);
   /** Whole boxes in the quantity entered (blank when it isn't a whole number of boxes) */
   const boxesInQuantity = stripsPerBox > 0 && quantity > 0 && quantity % stripsPerBox === 0 ? quantity / stripsPerBox : 0;
   const mrp = Number(form.mrp) || 0;
@@ -158,7 +161,7 @@ export const Purchase = ({
   const perUnitPrice = calcPerUnitPrice(sellingPrice, packSize);
   const discount = mrp > 0 && sellingPrice > 0 ? calcDiscount(mrp, sellingPrice) : 0;
   const purchaseCost = calcPurchaseCost(purchaseRate, quantity);
-  const unitWord = unitNoun(form.purchaseUnitType, packSize);
+  const unitWord = singleItem ? "Pieces" : unitNoun(form.purchaseUnitType, packSize);
 
   /* -------------------------------- save --------------------------------- */
   /** A purchase-order line, received against: fills the goods-receipt form. */
@@ -183,7 +186,7 @@ export const Purchase = ({
       packSize: String(draft.pack_size || ""),
       quantity: String(draft.packs || ""),
       purchaseRate: draft.rate ? String(draft.rate) : "",
-      ...(isSingleItem(medicine?.product_type || "") && SINGLE_ITEM),
+      ...singleItemPatch(medicine?.product_type || "", medicine?.purchase_unit_type || ""),
     }));
     setTab("receipt");
   };
@@ -227,7 +230,7 @@ export const Purchase = ({
       product_type: form.productType,
       hsn_code: form.hsnCode.trim(),
       gst_percent: Number(form.gst) || 0,
-      purchase_unit_type: singleItem ? "Piece" : form.purchaseUnitType,
+      purchase_unit_type: singleUnit ?? form.purchaseUnitType,
       ...(!form.medicineId && { low_stock_threshold: settings?.low_stock_threshold ?? 10 }),
     }));
     if (!savedMedicine.ok) return;
@@ -244,7 +247,7 @@ export const Purchase = ({
       mfg_date: form.mfgDate,
       exp_date: form.expDate,
       box: form.box.trim().toUpperCase(),
-      purchase_unit_type: singleItem ? "Piece" : form.purchaseUnitType,
+      purchase_unit_type: singleUnit ?? form.purchaseUnitType,
       pack_size: packSize,
       strips_per_box: stripsPerBox,
       qty_packs: quantity,
@@ -431,7 +434,7 @@ export const Purchase = ({
           <Field label="Pack Type" className="md:col-span-2">
             <Select
               value={form.purchaseUnitType}
-              disabled={singleItem}
+              disabled={isPieceProductType(form.productType)}
               onChange={(e) => set("purchaseUnitType", e.target.value as PurchaseUnitType)}
             >
               {productTypeOptions(purchaseUnits, form.purchaseUnitType).map((unit) => (
@@ -460,7 +463,14 @@ export const Purchase = ({
               value={form.productType}
               onChange={(e) => {
                 const productType = e.target.value;
-                setForm((prev) => ({ ...prev, productType, ...(isSingleItem(productType) && SINGLE_ITEM) }));
+                // Leaving a single-piece type goes back to the normal pack type, not a leftover "Piece".
+                const leaving = isPieceProductType(form.productType) && !isPieceProductType(productType);
+                setForm((prev) => ({
+                  ...prev,
+                  productType,
+                  ...(leaving && { purchaseUnitType: "Strip" as PurchaseUnitType, packSize: "" }),
+                  ...singleItemPatch(productType, leaving ? "Strip" : prev.purchaseUnitType),
+                }));
               }}
             >
               <option value="">— Select —</option>
@@ -635,7 +645,7 @@ export const Purchase = ({
 
         {/* Totals strip */}
         <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-[#e5e7eb] bg-[#e5e7eb] sm:grid-cols-4">
-          <SummaryCell label={`Total ${form.purchaseUnitType}s`} value={quantity ? String(quantity) : "—"} />
+          <SummaryCell label={`Total ${packWord}`} value={quantity ? String(quantity) : "—"} />
           <SummaryCell
             label="Purchase Total (you pay)"
             value={purchaseCost ? `₹ ${amount(purchaseCost)}` : "—"}
@@ -671,8 +681,7 @@ export const Purchase = ({
             {stockAdded > 0 ? (
               <>
                 Stock will be added as <b>{stockAdded} {unitWord}</b> in inventory ({quantity}{" "}
-                {form.purchaseUnitType}
-                {quantity === 1 ? "" : "s"} × {packSize} = {stockAdded} {unitWord})
+                {singleItem ? (quantity === 1 ? "Piece" : "Pieces") : `${form.purchaseUnitType}${quantity === 1 ? "" : "s"}`} × {packSize} = {stockAdded} {unitWord})
                 {boxesInQuantity ? ` · ${boxesInQuantity} box${boxesInQuantity === 1 ? "" : "es"} of ${stripsPerBox} ${packWord}` : ""}
                 {form.expDate ? ` · Expires ${monthShort(form.expDate)}` : ""}
                 {form.box ? ` · Box ${form.box}` : ""}

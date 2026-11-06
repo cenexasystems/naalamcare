@@ -232,6 +232,7 @@ export const scheduleIsOtc = (schedule: string): boolean => schedule === "OTC";
 export const unitNoun = (unitType: string, packSize: number): string => {
   if (unitType === "Strip") return packSize > 1 ? "Tablets" : "Tablet";
   if (unitType === "Bottle") return "Bottles";
+  if (unitType === "Cartridge") return "Cartridges";
   if (unitType === "Piece" || !unitType) return "Pieces";
   // Units added in Settings: a pack of one is the unit itself ("Tubes"), otherwise loose units.
   return packSize > 1 ? "Units" : packNoun(unitType);
@@ -244,6 +245,10 @@ export const packNoun = (unitType: string): string => {
   return /s$/i.test(unitType) ? unitType : `${unitType}s`;
 };
 
+/** Word for an older bottle / cartridge batch's multi-unit pack, so "5 bottles in a pack" never reads as "1 bottle". */
+const sellPackNoun = (unitType: string): string =>
+  unitType === "Bottle" || unitType === "Cartridge" ? "Packs" : packNoun(unitType);
+
 /** What a billing quantity counts: single units, whole packs (strips) or whole boxes. */
 export type SellBy = "unit" | "pack" | "box";
 
@@ -253,7 +258,7 @@ type PackInfo = { purchase_unit_type: string; pack_size: number; strips_per_box:
 export const sellByOptions = (b: PackInfo): { key: SellBy; label: string; units: number }[] => {
   const pack = b.pack_size || 1;
   const perBox = Math.max(0, b.strips_per_box || 0);
-  const packs = packNoun(b.purchase_unit_type);
+  const packs = sellPackNoun(b.purchase_unit_type);
   const options: { key: SellBy; label: string; units: number }[] = [
     { key: "unit", label: unitNoun(b.purchase_unit_type, pack), units: 1 },
   ];
@@ -276,7 +281,7 @@ export const stockBreakdown = (b: PackInfo & { stock_qty: number }): string => {
   }
   if (pack > 1) {
     const packs = Math.floor(left / pack);
-    const noun = packNoun(b.purchase_unit_type).toLowerCase();
+    const noun = sellPackNoun(b.purchase_unit_type).toLowerCase();
     add(packs, noun.replace(/s$/, ""), noun);
     left -= packs * pack;
   }

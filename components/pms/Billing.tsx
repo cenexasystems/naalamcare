@@ -51,7 +51,7 @@ const newClientRef = () =>
 
 /** What one sellable unit is called for a given purchase unit type */
 const saleNoun = (unitType: string): string =>
-  unitType === "Bottle" ? "Bottle" : unitType === "Piece" ? "Piece" : "Tablet";
+  !unitType || unitType === "Strip" ? "Tablet" : unitType;
 
 export const Billing = ({
   medicines,
@@ -640,7 +640,7 @@ export const Billing = ({
               <div className="min-w-0 flex-1">
                 <p className="text-[16px] font-bold leading-tight">
                   <span className="text-[var(--c-deep)]">{selected.generic_name.toUpperCase()}</span>{" "}
-                  <span className="text-gray-800">{batch.purchase_unit_type === "Bottle" ? "BOTTLE" : batch.purchase_unit_type === "Piece" ? "PIECE" : "TABLET"}</span>
+                  <span className="text-gray-800">{saleNoun(batch.purchase_unit_type).toUpperCase()}</span>
                 </p>
                 <p className="mt-1.5 text-[12.5px] text-gray-600">Salt: {selected.salt}</p>
                 <p className="text-[12.5px] text-gray-600">

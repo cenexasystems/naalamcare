@@ -16,7 +16,7 @@ import {
 import { checkOffer, planOffers, rewardUnitPrice, type OffMode, type Offer, type OfferType, type RewardMode } from "./offers";
 import { mapOffer } from "./db/map";
 import { normalisePromo } from "./promo";
-import { parseProductTypes, parsePurchaseUnits } from "./product-types";
+import { isPieceProductType, parseProductTypes, parsePurchaseUnits, singleItemUnit } from "./product-types";
 import {
   AuthError,
   builtInPasscodeStatus,
@@ -293,7 +293,7 @@ export async function saveMedicine(mode: Mode, payload: any): Promise<ActionResu
       productType: str(payload.product_type).slice(0, 40),
       hsnCode: str(payload.hsn_code),
       gstPercent: String(gst),
-      purchaseUnitType: str(payload.purchase_unit_type) || "Strip",
+      purchaseUnitType: isPieceProductType(str(payload.product_type)) ? "Piece" : str(payload.purchase_unit_type) || "Strip",
       ...(payload.barcode !== undefined && { barcode }),
       ...(payload.wholesale_moq !== undefined && { wholesaleMoq: Math.max(0, int(payload.wholesale_moq)) }),
       ...(payload.low_stock_threshold !== undefined && {
@@ -439,11 +439,16 @@ export async function saveBatch(mode: Mode, payload: any): Promise<ActionResult<
     return db.transaction(async (tx) => {
       await assertSupplierExists(tx, supplierId);
       const med = await tx
-        .select({ id: schema.medicines.id })
+        .select({ id: schema.medicines.id, productType: schema.medicines.productType })
         .from(schema.medicines)
         .where(eq(schema.medicines.id, payload.medicine_id))
         .limit(1);
       if (!med.length) fail("Pick a medicine from the catalogue.");
+
+      // New stock of single-item products (General, liquids, bottles, cartridges) is always one piece per
+      // pack, no boxes, so quantity = stock. Editing an existing batch keeps what it was saved with.
+      const singleUnit = isNewId(payload.id) ? singleItemUnit(med[0].productType, str(payload.purchase_unit_type)) : null;
+      const finalPackSize = singleUnit ? 1 : packSize;
 
       const values = {
         brandName: str(payload.brand_name),
@@ -454,11 +459,11 @@ export async function saveBatch(mode: Mode, payload: any): Promise<ActionResult<
         mfgDate: str(payload.mfg_date),
         expDate: str(payload.exp_date),
         box: str(payload.box).toUpperCase(),
-        purchaseUnitType: str(payload.purchase_unit_type) || "Strip",
-        packSize,
-        stripsPerBox: Math.max(0, int(payload.strips_per_box)),
+        purchaseUnitType: singleUnit ?? (str(payload.purchase_unit_type) || "Strip"),
+        packSize: finalPackSize,
+        stripsPerBox: singleUnit ? 0 : Math.max(0, int(payload.strips_per_box)),
         qtyPacks,
-        stockAdded: packSize * qtyPacks,
+        stockAdded: finalPackSize * qtyPacks,
         purchaseRate: String(rate),
         mrp: String(mrp),
         sellingPrice: String(selling),
@@ -494,7 +499,7 @@ export async function saveBatch(mode: Mode, payload: any): Promise<ActionResult<
         return payload.id as string;
       }
 
-      const received = packSize * qtyPacks;
+      const received = finalPackSize * qtyPacks;
       if (received <= 0) fail("Quantity must be greater than zero.");
       const res = await tx
         .insert(schema.batches)

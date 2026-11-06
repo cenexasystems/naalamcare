@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from "react";
 import { Plus, Trash2, PackageCheck, XCircle, Undo2 } from "lucide-react";
 import type { BatchRow, MedicineWithBatches, PurchaseOrder, PurchaseOrderItem, PurchaseReturn, Supplier } from "@/lib/types";
+import { singleItemUnit } from "@/lib/product-types";
 import { amount, dateSlash, monthShort, todayIso } from "@/lib/format";
 import { round2 } from "@/lib/calc";
 import { createPurchaseReturn, savePurchaseOrder, setPurchaseOrderStatus } from "@/lib/actions";
@@ -47,6 +48,9 @@ export const PurchaseOrders = ({
   const supplierName = (id: string | null) => suppliers.find((s) => s.id === id)?.name || "—";
   const medicine = medicines.find((m) => m.generic_name.toLowerCase() === line.name.trim().toLowerCase());
 
+  /** General items, liquids, bottles and cartridges are single pieces: no pack size to enter. */
+  const singleItem = Boolean(medicine && singleItemUnit(medicine.product_type, medicine.purchase_unit_type));
+
   const addLine = () => {
     if (!medicine) return;
     const packs = Math.floor(Number(line.packs) || 0);
@@ -58,7 +62,7 @@ export const PurchaseOrders = ({
         medicine_id: medicine.id,
         generic_name: medicine.generic_name,
         packs,
-        pack_size: Math.max(1, Math.floor(Number(line.pack_size) || lastBatch?.pack_size || 1)),
+        pack_size: singleItem ? 1 : Math.max(1, Math.floor(Number(line.pack_size) || lastBatch?.pack_size || 1)),
         rate: round2(Number(line.rate) || lastBatch?.purchase_rate || 0),
       },
     ]);
@@ -124,7 +128,8 @@ export const PurchaseOrders = ({
           <Field label="Units / pack" className="md:col-span-2">
             <TextInput
               type="number"
-              value={line.pack_size}
+              disabled={singleItem}
+              value={singleItem ? "1" : line.pack_size}
               onChange={(e) => setLine({ ...line, pack_size: e.target.value })}
               placeholder={String(medicine?.batches.at(-1)?.pack_size ?? "")}
             />
