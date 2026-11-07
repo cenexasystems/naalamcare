@@ -182,6 +182,10 @@ export const bills = pgTable(
     autoSlab: text("auto_slab").notNull().default(""),
     /** MRP value of the free items given by offers on this bill */
     offerSavings: numeric("offer_savings", { precision: 12, scale: 2 }).notNull().default("0"),
+    /** Membership discount on this bill, and the membership it used (snapshot) */
+    memberDiscount: numeric("member_discount", { precision: 12, scale: 2 }).notNull().default("0"),
+    memberNo: text("member_no").notNull().default(""),
+    memberPlan: text("member_plan").notNull().default(""),
     /** Offer discounts taken off paid lines on this bill */
     promoDiscount: numeric("promo_discount", { precision: 12, scale: 2 }).notNull().default("0"),
     shippingAddress: text("shipping_address").notNull().default(""),
@@ -234,6 +238,8 @@ export const billItems = pgTable(
     autoCategory: text("auto_category").notNull().default(""),
     autoPercent: numeric("auto_percent", { precision: 5, scale: 2 }).notNull().default("0"),
     autoDiscount: numeric("auto_discount", { precision: 12, scale: 2 }).notNull().default("0"),
+    /** Membership discount on this line */
+    memberDiscount: numeric("member_discount", { precision: 12, scale: 2 }).notNull().default("0"),
     /** Offer discount taken off this line (price offers, discounted rewards) */
     promoDiscount: numeric("promo_discount", { precision: 12, scale: 2 }).notNull().default("0"),
     /** Free item given by an offer (₹0 line), and the offer — kept even if the offer is later edited or deleted */
@@ -265,6 +271,8 @@ export const settings = pgTable("settings", {
   expiryAlertMonths: integer("expiry_alert_months").notNull().default(6),
   /** JSON list of product types offered when adding medicines ("" = the defaults) */
   productTypes: text("product_types").notNull().default(""),
+  /** JSON: membership module settings (lib/membership.ts); "" = off */
+  membershipSettings: text("membership_settings").notNull().default(""),
   /** JSON list of purchase units (Strip, Piece, Bottle…) ("" = the defaults) */
   purchaseUnits: text("purchase_units").notNull().default(""),
 });
@@ -498,3 +506,67 @@ export const offers = pgTable("offers", {
   priority: integer("priority").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+
+/* --------------------------------------------------------------------------
+   Memberships (optional; Settings → Membership). See lib/membership.ts.
+   Plans and members belong to one dashboard. Events keep the whole history of
+   a membership — registrations, renewals, plan changes and their payments.
+   -------------------------------------------------------------------------- */
+export const membershipPlans = pgTable("membership_plans", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  mode: text("mode").notNull(),
+  name: text("name").notNull(),
+  fee: numeric("fee", { precision: 12, scale: 2 }).notNull().default("0"),
+  validityValue: integer("validity_value").notNull().default(1),
+  /** "days" | "months" | "years" */
+  validityUnit: text("validity_unit").notNull().default("years"),
+  discountPercent: numeric("discount_percent", { precision: 5, scale: 2 }).notNull().default("0"),
+  minBill: numeric("min_bill", { precision: 12, scale: 2 }).notNull().default("0"),
+  maxDiscount: numeric("max_discount", { precision: 12, scale: 2 }).notNull().default("0"),
+  /** JSON list of product types; [] = every category */
+  categories: text("categories").notNull().default("[]"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const memberships = pgTable(
+  "memberships",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    memberNo: text("member_no").notNull().unique(),
+    mode: text("mode").notNull(),
+    customerId: text("customer_id").notNull(),
+    planId: uuid("plan_id").notNull(),
+    planName: text("plan_name").notNull(),
+    startDate: text("start_date").notNull(),
+    expiryDate: text("expiry_date").notNull(),
+    fee: numeric("fee", { precision: 12, scale: 2 }).notNull().default("0"),
+    paymentMethod: text("payment_method").notNull().default("Cash"),
+    /** "Paid" | "Pending" — no discount until paid */
+    paymentStatus: text("payment_status").notNull().default("Paid"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("memberships_customer_idx").on(table.customerId), index("memberships_mode_idx").on(table.mode)],
+);
+
+export const membershipEvents = pgTable(
+  "membership_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    membershipId: uuid("membership_id").notNull(),
+    mode: text("mode").notNull(),
+    type: text("type").notNull(),
+    planName: text("plan_name").notNull().default(""),
+    startDate: text("start_date").notNull().default(""),
+    expiryDate: text("expiry_date").notNull().default(""),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull().default("0"),
+    paymentMethod: text("payment_method").notNull().default(""),
+    paymentStatus: text("payment_status").notNull().default(""),
+    note: text("note").notNull().default(""),
+    actor: text("actor").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("membership_events_membership_idx").on(table.membershipId)],
+);

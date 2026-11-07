@@ -379,6 +379,9 @@ export const Reports = ({
               {viewing.auto_discount > 0 && (
                 <SummaryRow label={`of which automatic${viewing.auto_slab ? ` · ${viewing.auto_slab}` : ""}`} value={money(viewing.auto_discount)} />
               )}
+              {viewing.member_discount > 0 && (
+                <SummaryRow label={`of which membership · ${viewing.member_plan}`} value={money(viewing.member_discount)} />
+              )}
               <SummaryRow label="Taxable Amount" value={money(viewing.taxable_amount)} />
               <SummaryRow label={`GST (${viewing.gst_percent}%)`} value={money(viewing.gst_amount)} />
               <div className="flex items-center justify-between border-t border-[#eef1f3] pt-2.5">

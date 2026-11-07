@@ -14,7 +14,20 @@ import {
   type AutoDiscountConfig,
 } from "./auto-discounts";
 import { checkOffer, planOffers, rewardUnitPrice, type OffMode, type Offer, type OfferType, type RewardMode } from "./offers";
-import { mapOffer } from "./db/map";
+import { mapMembership, mapMembershipPlan, mapOffer } from "./db/map";
+import {
+  MEMBER_METHODS,
+  calcMemberDiscount,
+  canRenew,
+  memberStatus,
+  membershipOn,
+  normaliseMembershipSettings,
+  periodEnd,
+  renewalFee,
+  renewalPeriod,
+  statusGivesDiscount,
+  type MemberDiscount,
+} from "./membership";
 import { normalisePromo } from "./promo";
 import { isPieceProductType, parseProductTypes, parsePurchaseUnits, singleItemUnit } from "./product-types";
 import {
@@ -28,6 +41,7 @@ import {
   parseModes,
   requireAdmin,
   requireMode,
+  requireSession,
   resolvePasscode,
   setBuiltInPasscode,
   writeSession,
@@ -84,7 +98,7 @@ const addDays = (isoDate: string, days: number) => {
 const isExpired = (exp: string) => Boolean(exp) && exp < today().slice(0, 7);
 const isNewId = (id: unknown) => !id || (typeof id === "string" && (id.startsWith("id-") || id.startsWith("new-")));
 
-const nextVal = async (exec: Exec, seq: "customer_seq" | "bill_seq" | "wholesale_bill_seq" | "purchase_order_seq") => {
+const nextVal = async (exec: Exec, seq: "customer_seq" | "bill_seq" | "wholesale_bill_seq" | "purchase_order_seq" | "membership_seq") => {
   const res = await exec.execute(sql.raw(`SELECT nextval('${seq}') AS nextval`));
   const row = (res as any).rows ? (res as any).rows[0] : (res as any)[0];
   return parseInt(String(row.nextval), 10);
@@ -1183,6 +1197,8 @@ export async function submitBill(
     accepted_offers?: string[];
     /** Gift the counter picked, per offer id (must be one of that offer's choices) */
     offer_choices?: Record<string, string>;
+    /** Membership the counter applied (the server re-checks it belongs to this customer and is valid) */
+    membership_id?: string | null;
     received_amount: number;
     payment_method: string;
     bill_date?: string;
@@ -1499,15 +1515,49 @@ export async function submitBill(
       const afterPromo = round2(totals.grandTotal - promoTotal);
       const afterAuto = round2(afterPromo - auto.total);
       const offerDiscount = autoConfig.enabled ? 0 : calcBillOffer(settings.bill_offers, afterAuto).discount;
-      const afterOffer = round2(afterAuto - offerDiscount);
+      const afterBillOffer = round2(afterAuto - offerDiscount);
+      // Membership: only when the counter applied one, re-checked here against the saved records.
+      let member: MemberDiscount | null = null;
+      let memberRow: typeof schema.memberships.$inferSelect | null = null;
+      const membershipId = str(payload.membership_id);
+      if (membershipId) {
+        const memberSettings = normaliseMembershipSettings(
+          (await tx.select({ raw: schema.settings.membershipSettings }).from(schema.settings).where(eq(schema.settings.id, 1)).limit(1))[0]?.raw ?? "",
+        );
+        if (!membershipOn(memberSettings, mode)) fail("Membership is switched off for this dashboard.");
+        const rows = await tx
+          .select({ m: schema.memberships, p: schema.membershipPlans })
+          .from(schema.memberships)
+          .innerJoin(schema.membershipPlans, eq(schema.membershipPlans.id, schema.memberships.planId))
+          .where(and(eq(schema.memberships.id, membershipId), eq(schema.memberships.mode, mode)))
+          .limit(1);
+        if (!rows.length) fail("That membership isn't in this dashboard.");
+        memberRow = rows[0].m;
+        if (!customer || memberRow.customerId !== customer.id) fail("That membership belongs to another customer.");
+        const status = memberStatus(mapMembership(memberRow, "", ""), billDate, memberSettings);
+        if (!statusGivesDiscount(status)) fail("This membership can't be used right now (" + status.toLowerCase() + "). Remove it from the bill or renew it.");
+        member = calcMemberDiscount(
+          mapMembershipPlan(rows[0].p),
+          memberSettings,
+          priced.map((p, i) => ({
+            category: auto.lines[i].category,
+            amount: round2(p.perUnit * p.qty - p.promo),
+            auto: auto.lines[i].discount,
+            excluded: Boolean(p.offer && !p.offer.stack_auto),
+          })),
+          offerDiscount,
+        );
+      }
+      const memberDiscount = member?.discount ?? 0;
+      const afterOffer = round2(afterBillOffer - memberDiscount);
       const extraDiscount = Math.min(Math.max(0, round2(num(payload.extra_discount))), afterOffer);
       if (extraDiscount > 0 && auto.total > 0 && !autoConfig.allow_manual)
         fail("A manual discount can't be added on top of the automatic discount (Settings → Automatic Discounts).");
       // GST is inside the prices: take it out of what each line actually costs after its discounts.
       const gstAmount = round2(
-        priced.reduce((s, p, i) => s + calcIncludedGst(auto.lines[i].net, num(p.batch.gstPercent)), 0),
+        priced.reduce((s, p, i) => s + calcIncludedGst(auto.lines[i].net - (member?.lines[i] ?? 0), num(p.batch.gstPercent)), 0),
       );
-      const taxableAmount = round2(afterAuto - gstAmount);
+      const taxableAmount = round2(afterAuto - memberDiscount - gstAmount);
       const gstPercent = taxableAmount > 0 ? round2((gstAmount / taxableAmount) * 100) : 0;
       if (settings.max_discount_percent > 0 && extraDiscount > round2((totals.grandTotal * settings.max_discount_percent) / 100) + 0.01)
         fail(`The extra discount can't be more than ${settings.max_discount_percent}% of the bill.`);
@@ -1563,7 +1613,10 @@ export async function submitBill(
         txnRef: str(payload.txn_ref),
         billDate,
         subTotal: totals.subTotal.toString(),
-        discount: round2(totals.discount + promoTotal + auto.total + offerDiscount + extraDiscount).toString(),
+        discount: round2(totals.discount + promoTotal + auto.total + memberDiscount + offerDiscount + extraDiscount).toString(),
+        memberDiscount: memberDiscount.toString(),
+        memberNo: memberDiscount > 0 && memberRow ? memberRow.memberNo : "",
+        memberPlan: memberDiscount > 0 && memberRow ? memberRow.planName : "",
         promoDiscount: promoTotal.toString(),
         autoDiscount: auto.total.toString(),
         autoSlab: auto.total > 0 && auto.slab ? `${auto.slab.name} (${slabRange(auto.slab)})` : "",
@@ -1610,6 +1663,7 @@ export async function submitBill(
           gstPercent: p.batch.gstPercent,
           costPerUnit: p.costPerUnit.toString(),
           promoDiscount: p.promo.toString(),
+          memberDiscount: (member?.lines[index] ?? 0).toString(),
           offerId: p.offer?.id ?? null,
           offerName: p.offer?.name ?? "",
           autoCategory: autoLine.category,
@@ -1767,7 +1821,7 @@ export async function createSalesReturn(
       // discount (offer, counter discount) shared across lines — so refunds match what was paid.
       const nets = billLineNets({
         grand_total: num(bill.grandTotal),
-        items: items.map((i) => ({ line_amount: num(i.lineAmount), auto_discount: num(i.autoDiscount), promo_discount: num(i.promoDiscount) })),
+        items: items.map((i) => ({ line_amount: num(i.lineAmount), auto_discount: num(i.autoDiscount), promo_discount: num(i.promoDiscount), member_discount: num(i.memberDiscount) })),
       });
       const unitPaid = new Map(items.map((i, idx) => [i.id, i.qty > 0 ? nets[idx] / i.qty : 0]));
 
@@ -2343,5 +2397,294 @@ export async function cancelBill(
     }
     await db.update(schema.bills).set({ status: "CANCELLED" }).where(eq(schema.bills.id, rows[0].id));
     return result;
+  });
+}
+
+/* ==========================================================================
+   Memberships — Settings → Membership, the Membership screen, and billing.
+   Plans, settings and edits are admin only; any user of the dashboard can
+   register and renew. Fees come from the saved plan, never from the counter.
+   ========================================================================== */
+
+const memberMethod = (v: unknown) => (MEMBER_METHODS.includes(str(v)) ? str(v) : "Cash");
+const memberPaid = (v: unknown) => (str(v) === "Pending" ? "Pending" : "Paid");
+
+const loadMemberSettings = async () =>
+  normaliseMembershipSettings(
+    (await db.select({ raw: schema.settings.membershipSettings }).from(schema.settings).where(eq(schema.settings.id, 1)).limit(1))[0]?.raw ?? "",
+  );
+
+export async function saveMembershipSettings(mode: Mode, payload: unknown): Promise<ActionResult<null>> {
+  return run(async () => {
+    await requireMode(mode, { admin: true });
+    const settings = normaliseMembershipSettings(payload);
+    await db.update(schema.settings).set({ membershipSettings: JSON.stringify(settings) }).where(eq(schema.settings.id, 1));
+    return null;
+  });
+}
+
+export async function saveMembershipPlan(mode: Mode, payload: any): Promise<ActionResult<string>> {
+  return run(async () => {
+    await requireMode(mode, { admin: true });
+    const name = str(payload?.name).slice(0, 60);
+    if (!name) fail("Enter the membership name.");
+    const fee = round2(num(payload?.fee));
+    const percent = round2(num(payload?.discount_percent));
+    const minBill = round2(num(payload?.min_bill));
+    const maxDiscount = round2(num(payload?.max_discount));
+    const validityValue = int(payload?.validity_value);
+    const validityUnit = payload?.validity_unit === "days" || payload?.validity_unit === "months" ? payload.validity_unit : "years";
+    if (fee < 0 || minBill < 0 || maxDiscount < 0) fail("Amounts can't be negative.");
+    if (percent <= 0 || percent > 100) fail("Discount must be more than 0% and at most 100%.");
+    if (validityValue < 1) fail("Validity must be at least 1.");
+    const active = payload?.active !== false;
+    const id = str(payload?.id);
+    const same = await db.select().from(schema.membershipPlans).where(eq(schema.membershipPlans.mode, mode));
+    if (same.some((p) => p.id !== id && p.name.toLowerCase() === name.toLowerCase())) fail("There is already a plan called " + name + ".");
+    const settings = await loadMemberSettings();
+    if (active && !settings.allow_multiple_plans && same.some((p) => p.id !== id && p.active))
+      fail("Only one plan can be active: Allow Multiple Plans is off in Settings → Membership.");
+    const values = {
+      mode,
+      name,
+      fee: String(fee),
+      validityValue,
+      validityUnit,
+      discountPercent: String(percent),
+      minBill: String(minBill),
+      maxDiscount: String(maxDiscount),
+      categories: JSON.stringify((Array.isArray(payload?.categories) ? payload.categories : []).map(str).filter(Boolean)),
+      active,
+    };
+    if (id && !isNewId(id)) {
+      const res = await db
+        .update(schema.membershipPlans)
+        .set(values)
+        .where(and(eq(schema.membershipPlans.id, id), eq(schema.membershipPlans.mode, mode)))
+        .returning({ id: schema.membershipPlans.id });
+      if (!res.length) fail("That plan no longer exists.");
+      return id;
+    }
+    const res = await db.insert(schema.membershipPlans).values(values).returning({ id: schema.membershipPlans.id });
+    return res[0].id;
+  });
+}
+
+/** Register a customer: an existing one, or a new one from name + mobile. */
+export async function registerMembership(
+  mode: Mode,
+  payload: {
+    customer_id?: string | null;
+    name?: string;
+    phone?: string;
+    plan_id: string;
+    start_date: string;
+    payment_method: string;
+    payment_status: string;
+    allow_duplicate?: boolean;
+  },
+): Promise<ActionResult<string>> {
+  return run(async () => {
+    await requireMode(mode);
+    const session = await requireSession();
+    const actor = await actorOf();
+    const settings = await loadMemberSettings();
+    if (!membershipOn(settings, mode)) fail("Membership is switched off for this dashboard.");
+    const start = isIsoDate(payload.start_date) ? payload.start_date : today();
+    const plans = await db
+      .select()
+      .from(schema.membershipPlans)
+      .where(and(eq(schema.membershipPlans.id, str(payload.plan_id)), eq(schema.membershipPlans.mode, mode)))
+      .limit(1);
+    if (!plans.length) fail("Choose a membership plan.");
+    if (!plans[0].active) fail("That plan is inactive.");
+    const plan = mapMembershipPlan(plans[0]);
+    const expiry = periodEnd(start, plan.validity_value, plan.validity_unit);
+
+    return db.transaction(async (tx) => {
+      const phone = str(payload.phone);
+      let customerId = str(payload.customer_id);
+      if (customerId) {
+        const found = await tx
+          .select({ id: schema.customers.id })
+          .from(schema.customers)
+          .where(and(eq(schema.customers.id, customerId), eq(schema.customers.mode, mode)))
+          .limit(1);
+        if (!found.length) fail("That customer belongs to the other dashboard or no longer exists.");
+      } else {
+        if (!/^\d{10}$/.test(phone)) fail("Enter the customer's 10-digit mobile number.");
+        const found = await tx
+          .select({ id: schema.customers.id })
+          .from(schema.customers)
+          .where(and(eq(schema.customers.phone, phone), eq(schema.customers.mode, mode)))
+          .limit(1);
+        if (found.length) customerId = found[0].id;
+        else {
+          if (!str(payload.name)) fail("Enter the customer's name.");
+          customerId = formatCustomerId(await nextVal(tx, "customer_seq"), mode);
+          await tx.insert(schema.customers).values({ id: customerId, name: str(payload.name), phone, mode });
+        }
+      }
+      // One membership per customer per period, unless an admin explicitly allows another.
+      const existing = await tx
+        .select()
+        .from(schema.memberships)
+        .where(and(eq(schema.memberships.customerId, customerId), eq(schema.memberships.mode, mode), eq(schema.memberships.active, true)));
+      const clash = existing.find((m) => m.startDate <= expiry && m.expiryDate >= start);
+      if (clash && !(payload.allow_duplicate && session.role === "admin"))
+        fail("This customer already has a membership for this period (" + clash.memberNo + "). Renew or change that one instead.");
+
+      const seq = await nextVal(tx, "membership_seq");
+      const memberNo = "MEM-" + (mode === "wholesale" ? "W" : "R") + String(seq).padStart(6, "0");
+      const paymentMethod = memberMethod(payload.payment_method);
+      const paymentStatus = memberPaid(payload.payment_status);
+      const res = await tx
+        .insert(schema.memberships)
+        .values({
+          memberNo,
+          mode,
+          customerId,
+          planId: plan.id,
+          planName: plan.name,
+          startDate: start,
+          expiryDate: expiry,
+          fee: String(plan.fee),
+          paymentMethod,
+          paymentStatus,
+        })
+        .returning({ id: schema.memberships.id });
+      await tx.insert(schema.membershipEvents).values({
+        membershipId: res[0].id,
+        mode,
+        type: "Registered",
+        planName: plan.name,
+        startDate: start,
+        expiryDate: expiry,
+        amount: String(plan.fee),
+        paymentMethod,
+        paymentStatus,
+        actor,
+      });
+      return memberNo;
+    });
+  });
+}
+
+/** Renew for the plan's validity, collecting the configured renewal fee. The old period stays in the history. */
+export async function renewMembership(
+  mode: Mode,
+  payload: { id: string; payment_method: string; payment_status: string },
+): Promise<ActionResult<string>> {
+  return run(async () => {
+    await requireMode(mode);
+    const actor = await actorOf();
+    const settings = await loadMemberSettings();
+    if (!membershipOn(settings, mode)) fail("Membership is switched off for this dashboard.");
+    const rows = await db
+      .select({ m: schema.memberships, p: schema.membershipPlans })
+      .from(schema.memberships)
+      .innerJoin(schema.membershipPlans, eq(schema.membershipPlans.id, schema.memberships.planId))
+      .where(and(eq(schema.memberships.id, str(payload.id)), eq(schema.memberships.mode, mode)))
+      .limit(1);
+    if (!rows.length) fail("Membership not found in this dashboard.");
+    const current = mapMembership(rows[0].m, "", "");
+    const plan = mapMembershipPlan(rows[0].p);
+    if (!plan.active) fail("This plan is inactive. Change the plan first.");
+    const date = today();
+    if (!canRenew(memberStatus(current, date, settings), settings))
+      fail(current.active ? "Renewal after expiry is switched off. Register a new membership instead." : "This membership is deactivated.");
+    const period = renewalPeriod(current, plan, date);
+    const fee = renewalFee(plan, settings);
+    const paymentMethod = memberMethod(payload.payment_method);
+    const paymentStatus = memberPaid(payload.payment_status);
+    await db.transaction(async (tx) => {
+      await tx
+        .update(schema.memberships)
+        .set({ expiryDate: period.expiry, fee: String(fee), paymentMethod, paymentStatus, ...(current.expiry_date < date && { startDate: period.start }) })
+        .where(eq(schema.memberships.id, current.id));
+      await tx.insert(schema.membershipEvents).values({
+        membershipId: current.id,
+        mode,
+        type: "Renewed",
+        planName: plan.name,
+        startDate: period.start,
+        expiryDate: period.expiry,
+        amount: String(fee),
+        paymentMethod,
+        paymentStatus,
+        actor,
+      });
+    });
+    return period.expiry;
+  });
+}
+
+/** Admin: edit dates / payment, change plan, or activate / deactivate. Every change goes in the history. */
+export async function updateMembership(
+  mode: Mode,
+  payload: {
+    id: string;
+    plan_id?: string;
+    start_date?: string;
+    expiry_date?: string;
+    payment_method?: string;
+    payment_status?: string;
+    active?: boolean;
+  },
+): Promise<ActionResult<null>> {
+  return run(async () => {
+    await requireMode(mode, { admin: true });
+    const actor = await actorOf();
+    const rows = await db
+      .select()
+      .from(schema.memberships)
+      .where(and(eq(schema.memberships.id, str(payload.id)), eq(schema.memberships.mode, mode)))
+      .limit(1);
+    if (!rows.length) fail("Membership not found in this dashboard.");
+    const m = rows[0];
+    let planId = m.planId;
+    let planName = m.planName;
+    const changes: string[] = [];
+    if (payload.plan_id && payload.plan_id !== m.planId) {
+      const plans = await db
+        .select()
+        .from(schema.membershipPlans)
+        .where(and(eq(schema.membershipPlans.id, str(payload.plan_id)), eq(schema.membershipPlans.mode, mode)))
+        .limit(1);
+      if (!plans.length || !plans[0].active) fail("Choose an active plan.");
+      planId = plans[0].id;
+      planName = plans[0].name;
+      changes.push("Plan " + m.planName + " → " + planName);
+    }
+    const startDate = isIsoDate(payload.start_date) ? payload.start_date : m.startDate;
+    const expiryDate = isIsoDate(payload.expiry_date) ? payload.expiry_date : m.expiryDate;
+    if (expiryDate < startDate) fail("The expiry date is before the start date.");
+    if (startDate !== m.startDate || expiryDate !== m.expiryDate) changes.push("Dates changed");
+    const paymentMethod = payload.payment_method !== undefined ? memberMethod(payload.payment_method) : m.paymentMethod;
+    const paymentStatus = payload.payment_status !== undefined ? memberPaid(payload.payment_status) : m.paymentStatus;
+    if (paymentStatus !== m.paymentStatus) changes.push("Payment " + paymentStatus);
+    else if (paymentMethod !== m.paymentMethod) changes.push("Payment method " + paymentMethod);
+    const active = payload.active ?? m.active;
+    if (active !== m.active) changes.push(active ? "Activated" : "Deactivated");
+    if (!changes.length) return null;
+    await db.transaction(async (tx) => {
+      await tx
+        .update(schema.memberships)
+        .set({ planId, planName, startDate, expiryDate, paymentMethod, paymentStatus, active })
+        .where(eq(schema.memberships.id, m.id));
+      await tx.insert(schema.membershipEvents).values({
+        membershipId: m.id,
+        mode,
+        type: "Edited",
+        planName,
+        startDate,
+        expiryDate,
+        paymentMethod,
+        paymentStatus,
+        note: changes.join(" · "),
+        actor,
+      });
+    });
+    return null;
   });
 }

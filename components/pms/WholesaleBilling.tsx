@@ -17,14 +17,16 @@ import {
   Undo2,
 } from "lucide-react";
 import type { Batch, Bill, CartLine, Customer, DiscountTier, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
-import { calcBillOffer, calcBillTotals, round2 } from "@/lib/calc";
+import { calcBillOffer, calcBillTotals, calcIncludedGst, round2 } from "@/lib/calc";
+import { calcMemberDiscount, memberForBill, membershipOn } from "@/lib/membership";
+import { MemberBillPanel } from "./Membership";
 import { calcAutoDiscounts, slabRange } from "@/lib/auto-discounts";
 import { amount, money, monthShort, stockBreakdown, todayIso, unitNoun, type SellBy } from "@/lib/format";
 import { listHeldBills, saveHeldBills } from "@/lib/store";
 import { addPharmacyAtBilling, submitBill } from "@/lib/actions";
 import { Card, Pill, ScheduleBadge, ScreenHeading, Select } from "./ui";
 import { act } from "./mode-context";
-import { mutateAll, useSettings } from "./data";
+import { mutateAll, useMemberships, useSettings } from "./data";
 import { ReturnModal } from "./Payments";
 
 /* ==========================================================================
@@ -315,7 +317,25 @@ export const WholesaleBilling = ({
   );
   const afterType = round2(totals.grandTotal - (auto?.total ?? 0));
   const billOffer = calcBillOffer(autoConfig?.enabled ? [] : (ms?.bill_offers ?? []), afterType);
-  const payable = round2(afterType - billOffer.discount);
+  // Membership (optional, Settings → Membership → Enable Wholesale): its own step after the above.
+  const { data: memberData } = useMemberships();
+  const memberEnabled = membershipOn(memberData?.settings, "wholesale");
+  const memberInfo = memberForBill(memberEnabled ? memberData : undefined, customer?.id, billDate);
+  const memberCalc =
+    memberEnabled && memberData && memberInfo.usable && memberInfo.plan && auto
+      ? calcMemberDiscount(
+          memberInfo.plan,
+          memberData.settings,
+          priced.map((l, i) => ({ category: auto.lines[i].category, amount: round2(l.per_unit_price * l.qty), auto: auto.lines[i].discount })),
+          billOffer.discount,
+        )
+      : null;
+  const memberDiscount = memberCalc?.discount ?? 0;
+  const memberGst =
+    memberDiscount > 0 && auto && memberCalc
+      ? round2(priced.reduce((s, l, i) => s + calcIncludedGst(auto.lines[i].net - memberCalc.lines[i], l.gst_percent), 0))
+      : null;
+  const payable = round2(afterType - billOffer.discount - memberDiscount);
   const receivedNum = Number(received) || 0;
   const isCredit = payment === "Credit";
   const dueNow = isCredit ? round2(Math.max(0, payable - receivedNum)) : 0;
@@ -383,6 +403,7 @@ export const WholesaleBilling = ({
           payment_method: payment,
           bill_date: billDate,
           lines: priced.map((l) => ({ batch_id: l.batch_id, qty: l.qty, per_unit_price: l.per_unit_price })),
+          membership_id: memberDiscount > 0 ? memberInfo.membership?.id : null,
         }),
       );
       if (!result.ok) {
@@ -965,6 +986,20 @@ export const WholesaleBilling = ({
             </div>
           )}
 
+          {memberEnabled && memberData && (
+            <MemberBillPanel
+              customer={customer}
+              data={memberData}
+              date={billDate}
+              result={memberCalc}
+              hasItems={lines.length > 0}
+              onDone={(message) => {
+                mutateAll();
+                setNotice(message);
+              }}
+            />
+          )}
+
           <div className="mt-4 space-y-2.5 text-[13px]">
             <Row label={`Sub Total (MRP, ${totals.itemCount} items)`} value={money(totals.subTotal)} />
             <Row label="Discount" value={money(totals.discount)} green />
@@ -984,8 +1019,11 @@ export const WholesaleBilling = ({
                 green
               />
             )}
-            <Row label="Taxable Amount" value={money(totals.taxableAmount)} />
-            <Row label={`GST (${totals.gstPercent || 0}%)`} value={money(totals.gstAmount)} />
+            {memberDiscount > 0 && (
+              <Row label={`Member discount (${memberInfo.plan?.name}, ${memberInfo.plan?.discount_percent}%)`} value={`− ${money(memberDiscount)}`} green />
+            )}
+            <Row label="Taxable Amount" value={money(memberGst !== null ? round2(afterType - memberDiscount - memberGst) : totals.taxableAmount)} />
+            <Row label={`GST (${totals.gstPercent || 0}%)`} value={money(memberGst ?? totals.gstAmount)} />
           </div>
           {billOffer.next && (
             <p className="mt-3 rounded-lg bg-[var(--c-mint)] px-3 py-2 text-[11.5px] font-medium text-[var(--c-deep)]">

@@ -585,3 +585,63 @@ ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "reward_choices" text DEFAULT '[]'
 -- ---------------------------------------------------------------------------
 
 ALTER TABLE "batches" ADD COLUMN IF NOT EXISTS "archived" boolean DEFAULT false NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 23. Memberships (optional module, off until switched on)
+--     Plans and members per dashboard; events keep the full history; bills keep
+--     the discount and membership they used.
+-- ---------------------------------------------------------------------------
+
+CREATE SEQUENCE IF NOT EXISTS "public"."membership_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1;
+ALTER TABLE "settings" ADD COLUMN IF NOT EXISTS "membership_settings" text DEFAULT '' NOT NULL;
+CREATE TABLE IF NOT EXISTS "membership_plans" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"mode" text NOT NULL,
+	"name" text NOT NULL,
+	"fee" numeric(12, 2) DEFAULT '0' NOT NULL,
+	"validity_value" integer DEFAULT 1 NOT NULL,
+	"validity_unit" text DEFAULT 'years' NOT NULL,
+	"discount_percent" numeric(5, 2) DEFAULT '0' NOT NULL,
+	"min_bill" numeric(12, 2) DEFAULT '0' NOT NULL,
+	"max_discount" numeric(12, 2) DEFAULT '0' NOT NULL,
+	"categories" text DEFAULT '[]' NOT NULL,
+	"active" boolean DEFAULT true NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE TABLE IF NOT EXISTS "memberships" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"member_no" text NOT NULL UNIQUE,
+	"mode" text NOT NULL,
+	"customer_id" text NOT NULL,
+	"plan_id" uuid NOT NULL,
+	"plan_name" text NOT NULL,
+	"start_date" text NOT NULL,
+	"expiry_date" text NOT NULL,
+	"fee" numeric(12, 2) DEFAULT '0' NOT NULL,
+	"payment_method" text DEFAULT 'Cash' NOT NULL,
+	"payment_status" text DEFAULT 'Paid' NOT NULL,
+	"active" boolean DEFAULT true NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "memberships_customer_idx" ON "memberships" USING btree ("customer_id");
+CREATE INDEX IF NOT EXISTS "memberships_mode_idx" ON "memberships" USING btree ("mode");
+CREATE TABLE IF NOT EXISTS "membership_events" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"membership_id" uuid NOT NULL,
+	"mode" text NOT NULL,
+	"type" text NOT NULL,
+	"plan_name" text DEFAULT '' NOT NULL,
+	"start_date" text DEFAULT '' NOT NULL,
+	"expiry_date" text DEFAULT '' NOT NULL,
+	"amount" numeric(12, 2) DEFAULT '0' NOT NULL,
+	"payment_method" text DEFAULT '' NOT NULL,
+	"payment_status" text DEFAULT '' NOT NULL,
+	"note" text DEFAULT '' NOT NULL,
+	"actor" text DEFAULT '' NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "membership_events_membership_idx" ON "membership_events" USING btree ("membership_id");
+ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "member_discount" numeric(12, 2) DEFAULT '0' NOT NULL;
+ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "member_no" text DEFAULT '' NOT NULL;
+ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "member_plan" text DEFAULT '' NOT NULL;
+ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "member_discount" numeric(12, 2) DEFAULT '0' NOT NULL;

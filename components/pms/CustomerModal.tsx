@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Zap, Info, User, Phone, MapPin, Stethoscope, Printer, X, Search, Mail, Cake, FileText, UserCheck } from "lucide-react";
 import type { Customer } from "@/lib/types";
 import { useCustomers } from "./data";
@@ -25,17 +25,26 @@ export const CustomerModal = ({
   open,
   onClose,
   onConfirm,
+  initialPhone = "",
+  onCustomerChange,
+  memberNote,
 }: {
   open: boolean;
   onClose: () => void;
   onConfirm: (payload: CustomerPayload) => void;
+  /** Mobile number already entered at the counter */
+  initialPhone?: string;
+  /** Tells billing who the customer is, so membership follows any change made here */
+  onCustomerChange?: (customer: { id: string | null; phone: string }) => void;
+  /** Membership line shown above the fields */
+  memberNote?: React.ReactNode;
 }) => {
   // The dialog is keyed on `open` at the call site, so mounting gives a clean form.
   // Customers come from the Neon DB (via SWR); the parent already loaded this
   // endpoint, so it reads from cache with no extra request.
   const { data: customers = [] } = useCustomers();
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(initialPhone);
   const [address, setAddress] = useState("");
   const [doctor, setDoctor] = useState("");
   const [email, setEmail] = useState("");
@@ -55,6 +64,12 @@ export const CustomerModal = ({
     if (digits.length < 6) return null;
     return customers.find((c) => c.phone === digits) || null;
   }, [picked, phone, customers]);
+
+  const matchedId = matched?.id ?? null;
+  useEffect(() => {
+    if (open) onCustomerChange?.({ id: matchedId, phone });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, matchedId, phone]);
 
   /* Blank fields fall back to the matched customer's details. */
   const nameValue = name || matched?.name || "";
@@ -205,6 +220,8 @@ export const CustomerModal = ({
               </div>
             </div>
           )}
+
+          {memberNote}
 
           {/* Fields */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

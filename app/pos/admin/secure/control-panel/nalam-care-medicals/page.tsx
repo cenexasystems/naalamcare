@@ -13,6 +13,7 @@ import {
   useSuppliers,
   useSettings,
   useLedger,
+  useMemberships,
   mutateAll,
 } from "@/components/pms/data";
 import { ModeProvider, TOAST_EVENT } from "@/components/pms/mode-context";
@@ -25,6 +26,8 @@ import { WholesaleBilling } from "@/components/pms/WholesaleBilling";
 import { Purchase } from "@/components/pms/Purchase";
 import { Inventory } from "@/components/pms/Inventory";
 import { Customers } from "@/components/pms/Customers";
+import { Membership } from "@/components/pms/Membership";
+import { membershipOn } from "@/lib/membership";
 import { Suppliers } from "@/components/pms/Suppliers";
 import { Payments } from "@/components/pms/Payments";
 import { Reports } from "@/components/pms/Reports";
@@ -189,6 +192,12 @@ function Workspace({
   const { data: suppliers = [], isLoading: suppLoading } = useSuppliers();
   const { data: settings = null, isLoading: setLoading } = useSettings();
   const { data: ledger } = useLedger();
+  const { data: memberData } = useMemberships();
+  const memberEnabled = membershipOn(memberData?.settings, mode);
+  /* Membership switched off, or not on for this dashboard: leave its screen. */
+  useEffect(() => {
+    if (screen === "membership" && memberData && !memberEnabled) setScreen("billing");
+  }, [screen, memberData, memberEnabled, setScreen]);
 
   const isDataLoading = medLoading || batchLoading || billsLoading || custLoading || suppLoading || setLoading;
 
@@ -270,6 +279,7 @@ function Workspace({
         logo={settings?.logo || "/logos/nalam-care-medicals-logo.png"}
         useCustomLogo={Boolean(settings?.use_custom_logo)}
         shopName={settings?.shop_name || "Nalam Care Medicals"}
+        membershipEnabled={memberEnabled}
       />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -355,6 +365,8 @@ function Workspace({
           {screen === "customers" && (
             <Customers customers={customers} bills={bills} ledger={ledger} onChanged={notify} role={role} />
           )}
+
+          {screen === "membership" && memberEnabled && <Membership onChanged={notify} role={role} />}
 
           {screen === "suppliers" && role === "admin" && (
             <Suppliers suppliers={suppliers} batchRows={batchRows} ledger={ledger} onChanged={notify} />

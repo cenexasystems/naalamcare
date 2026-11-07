@@ -238,16 +238,16 @@ export const slabRange = (s: Pick<DiscountSlab, "min" | "max">): string =>
  */
 export const billLineNets = (bill: {
   grand_total: number;
-  items: { line_amount: number; auto_discount?: number; promo_discount?: number }[];
+  items: { line_amount: number; auto_discount?: number; promo_discount?: number; member_discount?: number }[];
 }): number[] => {
-  const afterAuto = bill.items.map((i) => n(i.line_amount) - n(i.promo_discount) - n(i.auto_discount));
+  const afterAuto = bill.items.map((i) => n(i.line_amount) - n(i.promo_discount) - n(i.auto_discount) - n(i.member_discount));
   const sum = afterAuto.reduce((s, x) => s + x, 0);
   const factor = sum > 0 ? n(bill.grand_total) / sum : 1;
   return afterAuto.map((x) => x * factor);
 };
 
 /** What one unit of each line actually cost the customer (see billLineNets). */
-export const unitPaidOf = <I extends { id: string; qty: number; line_amount: number; auto_discount?: number; promo_discount?: number }>(bill: {
+export const unitPaidOf = <I extends { id: string; qty: number; line_amount: number; auto_discount?: number; promo_discount?: number; member_discount?: number }>(bill: {
   grand_total: number;
   items: I[];
 }): ((item: I) => number) => {

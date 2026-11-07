@@ -1,12 +1,14 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Search, Download, Plus, Pencil, Trash2, Receipt, Phone, MapPin } from "lucide-react";
+import { Search, Download, Plus, Pencil, Trash2, Receipt, Phone, MapPin, BadgeCheck } from "lucide-react";
 import type { Bill, Customer, LedgerData } from "@/lib/types";
 import { amount, dateSlash, money, todayIso } from "@/lib/format";
 import { deleteCustomer, recordCustomerPayment, saveCustomer } from "@/lib/actions";
 import { act, useMode } from "./mode-context";
-import { useSettings } from "./data";
+import { useMemberships, useSettings } from "./data";
+import { membershipOn } from "@/lib/membership";
+import { RegisterMembershipModal } from "./Membership";
 import { CUSTOMERS_SHEET } from "./exports";
 import { downloadExcel } from "@/lib/xlsx";
 import { Button, Card, Field, Modal, PageTitle, Pill, Select, TextInput } from "./ui";
@@ -32,6 +34,9 @@ export const Customers = ({
   const [selected, setSelected] = useState<Customer | null>(null);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [adding, setAdding] = useState(false);
+  const [registering, setRegistering] = useState<Customer | null>(null);
+  const { data: memberData } = useMemberships();
+  const memberEnabled = membershipOn(memberData?.settings, mode);
 
   const enriched = useMemo(() => {
     return customers.map((customer) => {
@@ -188,6 +193,16 @@ export const Customers = ({
                   <td className="td">{last ? dateSlash(last) : "—"}</td>
                   <td className="td">
                     <div className="flex items-center justify-end gap-1.5">
+                      {memberEnabled && (
+                        <button
+                          onClick={() => setRegistering(customer)}
+                          aria-label="Register Membership"
+                          title="Register Membership"
+                          className="cursor-pointer rounded-md p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-[var(--c-deep)]"
+                        >
+                          <BadgeCheck className="h-4 w-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => setSelected(customer)}
                         aria-label="Purchase history"
@@ -284,6 +299,16 @@ export const Customers = ({
                 )}
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1.5">
+                {memberEnabled && (
+                        <button
+                          onClick={() => setRegistering(customer)}
+                          aria-label="Register Membership"
+                          title="Register Membership"
+                          className="cursor-pointer rounded-md p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-[var(--c-deep)]"
+                        >
+                          <BadgeCheck className="h-4 w-4" />
+                        </button>
+                      )}
                 <button
                   onClick={() => setSelected(customer)}
                   aria-label="Purchase history"
@@ -419,6 +444,17 @@ export const Customers = ({
           </>
         )}
       </Modal>
+
+      {registering && (
+        <RegisterMembershipModal
+          customer={registering}
+          onClose={() => setRegistering(null)}
+          onDone={(message) => {
+            setRegistering(null);
+            onChanged(message);
+          }}
+        />
+      )}
 
       {/* Add / edit */}
       <CustomerFormModal

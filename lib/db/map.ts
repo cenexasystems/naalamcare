@@ -21,6 +21,7 @@ import { normalisePromo } from "../promo";
 import { normaliseTypeDiscounts } from "../type-discounts";
 import { defaultAutoDiscounts, normaliseAutoDiscounts } from "../auto-discounts";
 import type { Offer } from "../offers";
+import type { Membership, MembershipEvent, MembershipPlan } from "../membership";
 import { parseProductTypes, parsePurchaseUnits } from "../product-types";
 
 const modeOrNull = (value: unknown): Mode | null => (isMode(value) ? value : null);
@@ -150,6 +151,7 @@ export const mapBillItem = (row: any): BillItem => ({
   auto_category: row.autoCategory || "",
   auto_percent: toNum(row.autoPercent),
   auto_discount: toNum(row.autoDiscount),
+  member_discount: toNum(row.memberDiscount),
   promo_discount: toNum(row.promoDiscount),
   is_free: Boolean(row.isFree),
   offer_id: row.offerId ?? null,
@@ -189,6 +191,9 @@ export const mapBill = (row: any, items: any[] = []): Bill => ({
   auto_discount: toNum(row.autoDiscount),
   auto_slab: row.autoSlab || "",
   offer_savings: toNum(row.offerSavings),
+  member_discount: toNum(row.memberDiscount),
+  member_no: row.memberNo || "",
+  member_plan: row.memberPlan || "",
   promo_discount: toNum(row.promoDiscount),
   shipping_address: row.shippingAddress || "",
   customer_gstin: row.customerGstin || "",
@@ -350,5 +355,50 @@ export const mapOffer = (row: any): Offer => ({
   auto_apply: row.autoApply ?? true,
   stack_auto: Boolean(row.stackAuto),
   priority: row.priority ?? 0,
+  created_at: iso(row.createdAt),
+});
+
+export const mapMembershipPlan = (row: any): MembershipPlan => ({
+  id: row.id,
+  name: row.name,
+  fee: toNum(row.fee),
+  validity_value: row.validityValue ?? 1,
+  validity_unit: row.validityUnit === "days" || row.validityUnit === "months" ? row.validityUnit : "years",
+  discount_percent: toNum(row.discountPercent),
+  min_bill: toNum(row.minBill),
+  max_discount: toNum(row.maxDiscount),
+  categories: parseJson<string[]>(row.categories, []).filter((c) => typeof c === "string"),
+  active: Boolean(row.active),
+});
+
+export const mapMembership = (row: any, customerName: string, customerPhone: string): Membership => ({
+  id: row.id,
+  member_no: row.memberNo,
+  customer_id: row.customerId,
+  customer_name: customerName,
+  customer_phone: customerPhone,
+  plan_id: row.planId,
+  plan_name: row.planName,
+  start_date: row.startDate,
+  expiry_date: row.expiryDate,
+  fee: toNum(row.fee),
+  payment_method: row.paymentMethod || "",
+  payment_status: row.paymentStatus === "Pending" ? "Pending" : "Paid",
+  active: Boolean(row.active),
+  created_at: iso(row.createdAt),
+});
+
+export const mapMembershipEvent = (row: any): MembershipEvent => ({
+  id: row.id,
+  membership_id: row.membershipId,
+  type: row.type,
+  plan_name: row.planName || "",
+  start_date: row.startDate || "",
+  expiry_date: row.expiryDate || "",
+  amount: toNum(row.amount),
+  payment_method: row.paymentMethod || "",
+  payment_status: row.paymentStatus || "",
+  note: row.note || "",
+  actor: row.actor || "",
   created_at: iso(row.createdAt),
 });

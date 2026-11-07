@@ -13,6 +13,7 @@ import type {
 } from "@/lib/types";
 import type { Mode } from "@/lib/mode";
 import { useMode } from "./mode-context";
+import type { MembershipData } from "@/lib/membership";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url, { credentials: "same-origin" });
@@ -33,6 +34,7 @@ export const useSuppliers = () => useSWR<Supplier[]>(keyFor("/api/suppliers", us
 export const useBills = () => useSWR<Bill[]>(keyFor("/api/bills", useMode()), fetcher);
 export const useSettings = () => useSWR<ScopedSettings>(keyFor("/api/settings", useMode()), fetcher);
 export const useLedger = () => useSWR<LedgerData>(keyFor("/api/ledger", useMode()), fetcher);
+export const useMemberships = () => useSWR<MembershipData>(keyFor("/api/memberships", useMode()), fetcher);
 /** Admin only — pass false to skip the request for staff. */
 export const useReconciliation = (enabled: boolean) => {
   const mode = useMode();

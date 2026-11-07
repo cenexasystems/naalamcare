@@ -316,6 +316,14 @@ export default async function InvoicePage({
                   </td>
                   <td className="border border-black px-1 py-0.5 text-right">{amount(Math.max(0, bill.sub_total - bill.grand_total))}</td>
                 </tr>
+                {bill.member_discount > 0 && (
+                  <tr>
+                    <td className="border border-black px-1 py-0.5">
+                      of which Member Discount ({bill.member_plan} · {bill.member_no})
+                    </td>
+                    <td className="border border-black px-1 py-0.5 text-right">{amount(bill.member_discount)}</td>
+                  </tr>
+                )}
                 <tr>
                   <td className="border border-black px-1 py-0.5">Tax Amount</td>
                   <td className="border border-black px-1 py-0.5 text-right">{amount(bill.gst_amount)}</td>

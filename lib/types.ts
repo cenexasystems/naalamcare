@@ -194,6 +194,8 @@ export type BillItem = {
   auto_category: string;
   auto_percent: number;
   auto_discount: number;
+  /** Membership discount on this line */
+  member_discount: number;
   /** Offer discount taken off this line (price offers, discounted rewards) */
   promo_discount: number;
   /** A free item given by an offer (₹0), and which offer (snapshot) */
@@ -250,6 +252,10 @@ export type Bill = {
   auto_slab: string;
   /** MRP value of free items given by offers on this bill */
   offer_savings: number;
+  /** Membership discount on this bill, and the membership it used (snapshot) */
+  member_discount: number;
+  member_no: string;
+  member_plan: string;
   /** Offer discounts taken off paid lines (price offers, discounted rewards) */
   promo_discount: number;
   shipping_address: string;

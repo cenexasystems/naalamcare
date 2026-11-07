@@ -28,7 +28,9 @@ import { submitBill } from "@/lib/actions";
 import { Button, Card, Pill, ScheduleBadge, ScreenHeading, Select } from "./ui";
 import { CustomerModal, type CustomerPayload } from "./CustomerModal";
 import { act, useMode } from "./mode-context";
-import { mutateAll, useBills, useSettings } from "./data";
+import { mutateAll, useBills, useCustomers, useMemberships, useSettings } from "./data";
+import { calcMemberDiscount, memberForBill, membershipOn } from "@/lib/membership";
+import { MemberBillPanel } from "./Membership";
 import { ReturnModal } from "./Payments";
 
 /** Quick-add quantities requested by the client (slide 3) */
@@ -98,6 +100,8 @@ export const Billing = ({
   const [returning, setReturning] = useState<Bill | null>(null);
   const { data: allBills } = useBills();
   const [customerOpen, setCustomerOpen] = useState(false);
+  /** Who the bill is for, as far as membership goes: the mobile lookup, or the Customer Details dialog */
+  const [billCust, setBillCust] = useState<{ id: string | null; phone: string }>({ id: null, phone: "" });
   const [notice, setNotice] = useState("");
 
   const mode = useMode();
@@ -244,6 +248,7 @@ export const Billing = ({
     setExtra({ kind: "amount", value: 0 });
     setAcceptedOffers([]);
     setOfferChoices({});
+    setBillCust({ id: null, phone: "" });
     clientRef.current = newClientRef();
     clearSelection();
   };
@@ -375,7 +380,30 @@ export const Billing = ({
   const autoTotal = auto?.total ?? 0;
   const afterType = round2(totals.grandTotal - promoTotal - autoTotal);
   const billOffer = calcBillOffer(autoConfig?.enabled ? [] : (settings?.mode_settings.bill_offers ?? []), afterType);
-  const afterOffer = round2(afterType - billOffer.discount);
+  // Membership (optional): its own step after the discounts above, which it never changes.
+  const { data: memberData } = useMemberships();
+  const { data: allCustomers = [] } = useCustomers();
+  const memberEnabled = membershipOn(memberData?.settings, mode);
+  const billCustomer = memberEnabled
+    ? allCustomers.find((c) => (billCust.id ? c.id === billCust.id : billCust.phone.length >= 6 && c.phone === billCust.phone)) ?? null
+    : null;
+  const memberInfo = memberForBill(memberData, billCustomer?.id, billDate);
+  const memberCalc =
+    memberEnabled && memberData && memberInfo.usable && memberInfo.plan && auto
+      ? calcMemberDiscount(
+          memberInfo.plan,
+          memberData.settings,
+          charged.map((c, i) => ({
+            category: auto.lines[i].category,
+            amount: round2(c.per_unit_price * c.qty - c.promo),
+            auto: auto.lines[i].discount,
+            excluded: Boolean(c.offer && !c.offer.stack_auto),
+          })),
+          billOffer.discount,
+        )
+      : null;
+  const memberDiscount = memberCalc?.discount ?? 0;
+  const afterOffer = round2(afterType - billOffer.discount - memberDiscount);
   /** Manual discount switched off while an automatic discount applies (Settings) */
   const manualBlocked = autoTotal > 0 && autoConfig?.allow_manual === false;
   /** The next bigger slab and how much more the bill needs to reach it */
@@ -415,7 +443,7 @@ export const Billing = ({
   }
 
   const gstAfterAuto = round2(
-    charged.reduce((s, c, i) => s + calcIncludedGst(auto?.lines[i]?.net ?? c.per_unit_price * c.qty - c.promo, c.gst_percent), 0),
+    charged.reduce((s, c, i) => s + calcIncludedGst((auto?.lines[i]?.net ?? c.per_unit_price * c.qty - c.promo) - (memberCalc?.lines[i] ?? 0), c.gst_percent), 0),
   );
   const extraDiscount = manualBlocked
     ? 0
@@ -482,6 +510,7 @@ export const Billing = ({
         billed_by: customer.billedBy,
         txn_ref: txnRef,
         extra_discount: extraDiscount,
+        membership_id: memberDiscount > 0 ? memberInfo.membership?.id : null,
         accepted_offers: acceptedOffers,
         offer_choices: offerChoices,
         received_amount: receivedNum,
@@ -1146,6 +1175,22 @@ export const Billing = ({
             )}
           </div>
 
+          {memberEnabled && memberData && (
+            <MemberBillPanel
+              phone={billCust.phone}
+              onPhone={(phone) => setBillCust({ id: null, phone })}
+              customer={billCustomer}
+              data={memberData}
+              date={billDate}
+              result={memberCalc}
+              hasItems={lines.length > 0}
+              onDone={(message) => {
+                mutateAll();
+                setNotice(message);
+              }}
+            />
+          )}
+
           <div className="mt-3 space-y-2.5 text-[13px]">
             {billOffer.offer && (
               <Row
@@ -1154,6 +1199,9 @@ export const Billing = ({
                 tone="green"
               />
             )}
+            {memberDiscount > 0 && (
+              <Row label={`Member discount (${memberInfo.plan?.name}, ${memberInfo.plan?.discount_percent}%)`} value={`− ${money(memberDiscount)}`} tone="green" />
+            )}
             {extraDiscount > 0 && (
               <Row
                 label={extra.kind === "percent" ? `Extra discount (${extra.value}%)` : "Extra discount"}
@@ -1161,7 +1209,7 @@ export const Billing = ({
                 tone="green"
               />
             )}
-            <Row label="Taxable Amount" value={money(round2(afterType - gstAfterAuto))} />
+            <Row label="Taxable Amount" value={money(round2(afterType - memberDiscount - gstAfterAuto))} />
             <Row label="GST (included)" value={money(gstAfterAuto)} />
           </div>
           {billOffer.next && (
@@ -1391,6 +1439,15 @@ export const Billing = ({
         open={customerOpen}
         onClose={() => setCustomerOpen(false)}
         onConfirm={finishBill}
+        initialPhone={memberEnabled ? billCust.phone : ""}
+        onCustomerChange={memberEnabled ? setBillCust : undefined}
+        memberNote={
+          memberDiscount > 0 ? (
+            <div className="mb-5 rounded-xl border border-[#bbf7d0] bg-[#f2fbf5] px-4 py-3 text-[13px]">
+              <b className="text-[#15803d]">Member: {memberInfo.plan?.name}</b> · {memberInfo.membership?.member_no} · Discount {money(memberDiscount)} · Total <b>{money(payable)}</b>
+            </div>
+          ) : null
+        }
       />
 
       {notice && (

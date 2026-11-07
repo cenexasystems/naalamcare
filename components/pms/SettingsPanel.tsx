@@ -14,6 +14,7 @@ import { act, useMode, useModeState } from "./mode-context";
 import { AutoDiscountsCard, InvoicePromoCard, NotificationsCard, LoginPasscodesCard, PurchaseUnitsCard, ModeSettingsCard, ReconciliationCard, UsersCard } from "./SettingsExtras";
 import { downloadBlob } from "@/lib/xlsx";
 import { OffersSettings } from "./OffersSettings";
+import { MembershipSettingsTab } from "./Membership";
 import { Button, Card, Field, Modal, PageTitle, TextInput } from "./ui";
 
 export const SettingsPanel = ({
@@ -37,8 +38,8 @@ export const SettingsPanel = ({
   const [supplierDraft, setSupplierDraft] = useState<Supplier | null>(null);
   const [addingSupplier, setAddingSupplier] = useState(false);
   /** Retail admins get a Discounts tab (automatic category-wise discounts are retail only). */
-  const showTabs = isAdmin && mode === "retail" && !!initialSettings;
-  const [tab, setTab] = useState<"general" | "discounts" | "offers">("general");
+  const showTabs = isAdmin && !!initialSettings;
+  const [tab, setTab] = useState<"general" | "discounts" | "offers" | "membership">("general");
 
   /* Re-sync when the server row changes after a save, otherwise the panel
      keeps showing the pre-save draft. */
@@ -95,8 +96,13 @@ export const SettingsPanel = ({
         <div className="mb-4 flex w-fit gap-1 rounded-xl border border-[#e5e7eb] bg-white p-1 shadow-sm">
           {([
             ["general", "General"],
-            ["discounts", "Discounts"],
-            ["offers", "Offers"],
+            ...(mode === "retail"
+              ? ([
+                  ["discounts", "Discounts"],
+                  ["offers", "Offers"],
+                ] as const)
+              : []),
+            ["membership", "Membership"],
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -124,6 +130,11 @@ export const SettingsPanel = ({
       {/* Offers tab: Buy X Get Y and free gifts (retail). */}
       {showTabs && tab === "offers" && initialSettings && (
         <OffersSettings offers={initialSettings.offers} medicines={medicines} categories={initialSettings.product_types} onChanged={onChanged} />
+      )}
+
+      {/* Membership tab: the optional module's switches and defaults. */}
+      {showTabs && tab === "membership" && initialSettings && (
+        <MembershipSettingsTab categories={initialSettings.product_types} onChanged={onChanged} />
       )}
 
       <div className={showTabs && tab !== "general" ? "hidden" : ""}>

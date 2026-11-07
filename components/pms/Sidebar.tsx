@@ -12,6 +12,7 @@ import {
   Settings as SettingsIcon,
   Building2,
   Wallet,
+  BadgeCheck,
   X,
 } from "lucide-react";
 import { MODE_LABEL, type Mode } from "@/lib/mode";
@@ -22,6 +23,7 @@ export type ScreenKey =
   | "purchase"
   | "inventory"
   | "customers"
+  | "membership"
   | "suppliers"
   | "payments"
   | "reports"
@@ -42,6 +44,7 @@ export const NAV_ITEMS: {
   { key: "purchase", label: "Purchase", icon: <Truck className="h-[19px] w-[19px]" />, adminOnly: true },
   { key: "inventory", label: "Inventory", icon: <PackageSearch className="h-[19px] w-[19px]" /> },
   { key: "customers", label: "Customers", wholesaleLabel: "Customers & Distributors", icon: <Users className="h-[19px] w-[19px]" /> },
+  { key: "membership", label: "Membership", icon: <BadgeCheck className="h-[19px] w-[19px]" /> },
   { key: "suppliers", label: "Suppliers", icon: <Building2 className="h-[19px] w-[19px]" />, adminOnly: true },
   { key: "payments", label: "Invoices & Payments", icon: <Wallet className="h-[19px] w-[19px]" /> },
   { key: "reports", label: "Reports", icon: <BarChart3 className="h-[19px] w-[19px]" /> },
@@ -66,6 +69,7 @@ export const Sidebar = ({
   logo,
   useCustomLogo,
   shopName,
+  membershipEnabled = false,
 }: {
   active: ScreenKey;
   onSelect: (key: ScreenKey) => void;
@@ -83,8 +87,10 @@ export const Sidebar = ({
   /** When false the stored `logo` is ignored and the bundled logo is shown. */
   useCustomLogo?: boolean;
   shopName?: string;
+  /** Optional module: the Membership screen appears only when it is on for this dashboard */
+  membershipEnabled?: boolean;
 }) => {
-  const items = NAV_ITEMS.filter((item) => role === "admin" || !item.adminOnly);
+  const items = NAV_ITEMS.filter((item) => (role === "admin" || !item.adminOnly) && (item.key !== "membership" || membershipEnabled));
   const logoSrc = useCustomLogo ? logo || DEFAULT_LOGO : DEFAULT_LOGO;
   const brand = (shopName || "Nalam Care Medicals").toUpperCase();
   /* Keep the wordmark readable whatever the shop is called. */

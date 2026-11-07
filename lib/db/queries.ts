@@ -32,7 +32,11 @@ import {
   mapPurchaseOrder,
   mapStockMovement,
   mapOffer,
+  mapMembership,
+  mapMembershipEvent,
+  mapMembershipPlan,
 } from "./map";
+import { normaliseMembershipSettings, type MembershipData, type MembershipSettings } from "../membership";
 import type { Offer } from "../offers";
 import { syncCategories, type AutoDiscountConfig } from "../auto-discounts";
 
@@ -272,5 +276,35 @@ export async function getReconciliation(): Promise<ReconciliationSummary> {
     customers: customers.length,
     // Suppliers are a shared directory — nothing to classify.
     suppliers: 0,
+  };
+}
+
+/* ==========================================================================
+   Memberships
+   ========================================================================== */
+
+export async function getMembershipSettings(): Promise<MembershipSettings> {
+  const rows = await db.select({ raw: schema.settings.membershipSettings }).from(schema.settings).where(eq(schema.settings.id, 1)).limit(1);
+  return normaliseMembershipSettings(rows[0]?.raw ?? "");
+}
+
+/** Everything the membership screens and billing need, for one dashboard only. */
+export async function getMembershipData(mode: Mode): Promise<MembershipData> {
+  const [settings, plans, members, events] = await Promise.all([
+    getMembershipSettings(),
+    db.select().from(schema.membershipPlans).where(eq(schema.membershipPlans.mode, mode)).orderBy(asc(schema.membershipPlans.name)),
+    db
+      .select({ m: schema.memberships, name: schema.customers.name, phone: schema.customers.phone })
+      .from(schema.memberships)
+      .leftJoin(schema.customers, eq(schema.customers.id, schema.memberships.customerId))
+      .where(eq(schema.memberships.mode, mode))
+      .orderBy(desc(schema.memberships.createdAt)),
+    db.select().from(schema.membershipEvents).where(eq(schema.membershipEvents.mode, mode)).orderBy(desc(schema.membershipEvents.createdAt)),
+  ]);
+  return {
+    settings,
+    plans: plans.map(mapMembershipPlan),
+    members: members.map((r) => mapMembership(r.m, r.name ?? "", r.phone ?? "")),
+    events: events.map(mapMembershipEvent),
   };
 }
