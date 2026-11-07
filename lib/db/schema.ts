@@ -92,6 +92,8 @@ export const batches = pgTable(
     qtyPacks: integer("qty_packs").notNull().default(0),
     stockAdded: integer("stock_added").notNull().default(0),
     stockQty: integer("stock_qty").notNull().default(0),
+    /** Removed from Inventory but kept, because bills / returns / transfers refer to it */
+    archived: boolean("archived").notNull().default(false),
     purchaseRate: numeric("purchase_rate", { precision: 12, scale: 2 }).notNull().default("0"),
     mrp: numeric("mrp", { precision: 12, scale: 2 }).notNull().default("0"),
     sellingPrice: numeric("selling_price", { precision: 12, scale: 2 }).notNull().default("0"),

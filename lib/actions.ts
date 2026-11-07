@@ -521,28 +521,59 @@ export async function saveBatch(mode: Mode, payload: any): Promise<ActionResult<
   });
 }
 
-export async function deleteBatch(mode: Mode, id: string): Promise<ActionResult<null>> {
+/**
+ * Delete a batch from Inventory. A batch with history (sales, purchase returns, stock transfers) can't
+ * really be erased — its invoices, returns and reports refer to it — so it is removed from Inventory
+ * instead: remaining stock is written off in the ledger and the row is kept, hidden.
+ */
+export async function deleteBatch(mode: Mode, id: string): Promise<ActionResult<{ kept: boolean; writtenOff: number }>> {
   return run(async () => {
     await requireMode(mode, { admin: true });
     const sold = await db.select({ id: schema.billItems.id }).from(schema.billItems).where(eq(schema.billItems.batchId, id)).limit(1);
-    if (sold.length) fail("This batch has sales against it. Adjust its stock to zero instead of deleting it.");
     const returned = await db
       .select({ id: schema.purchaseReturns.id })
       .from(schema.purchaseReturns)
       .where(eq(schema.purchaseReturns.batchId, id))
       .limit(1);
-    if (returned.length) fail("This batch has purchase returns recorded and can't be deleted.");
     const self = await db.select({ source: schema.batches.sourceBatchId }).from(schema.batches).where(eq(schema.batches.id, id)).limit(1);
     const transferredOut = await db.select({ id: schema.batches.id }).from(schema.batches).where(eq(schema.batches.sourceBatchId, id)).limit(1);
-    if (self[0]?.source || transferredOut.length)
-      fail("This batch is part of a stock transfer between retail and wholesale. Adjust its stock instead of deleting it.");
+    const hasHistory = sold.length > 0 || returned.length > 0 || Boolean(self[0]?.source) || transferredOut.length > 0;
     const actor = await actorOf();
+    if (hasHistory) {
+      return db.transaction(async (tx) => {
+        const before = await tx
+          .select({ stockQty: schema.batches.stockQty })
+          .from(schema.batches)
+          .where(and(eq(schema.batches.id, id), eq(schema.batches.mode, mode)))
+          .limit(1);
+        if (!before.length) fail("Batch not found in this dashboard.");
+        const res = await tx
+          .update(schema.batches)
+          .set({ archived: true, stockQty: 0 })
+          .where(and(eq(schema.batches.id, id), eq(schema.batches.mode, mode)))
+          .returning();
+        await logMovement(tx, {
+          mode,
+          batchId: id,
+          medicineId: res[0].medicineId,
+          type: "EDIT",
+          qtyChange: -before[0].stockQty,
+          balanceAfter: 0,
+          reference: res[0].batchNo,
+          note: "Batch removed from Inventory (kept for its bills)",
+          actor,
+        });
+        return { kept: true, writtenOff: before[0].stockQty };
+      });
+    }
+    let writtenOff = 0;
     await db.transaction(async (tx) => {
       const res = await tx
         .delete(schema.batches)
         .where(and(eq(schema.batches.id, id), eq(schema.batches.mode, mode)))
         .returning();
       if (!res.length) fail("Batch not found in this dashboard.");
+      writtenOff = res[0].stockQty;
       await logMovement(tx, {
         mode,
         batchId: id,
@@ -555,7 +586,7 @@ export async function deleteBatch(mode: Mode, id: string): Promise<ActionResult<
         actor,
       });
     });
-    return null;
+    return { kept: false, writtenOff };
   });
 }
 
@@ -649,6 +680,7 @@ export async function transferStock(
         const res = await tx
           .update(schema.batches)
           .set({
+            archived: false,
             stockQty: sql`${schema.batches.stockQty} + ${qty}`,
             stockAdded: sql`${schema.batches.stockAdded} + ${qty}`,
             sellingPrice: String(selling),
@@ -1759,7 +1791,7 @@ export async function createSalesReturn(
 
         const stock = await tx
           .update(schema.batches)
-          .set({ stockQty: sql`${schema.batches.stockQty} + ${w.qty}` })
+          .set({ archived: false, stockQty: sql`${schema.batches.stockQty} + ${w.qty}` })
           .where(and(eq(schema.batches.id, item!.batchId!), eq(schema.batches.mode, mode)))
           .returning();
         if (!stock.length) fail(`Batch ${item!.batchNo} is no longer in this dashboard's inventory.`);

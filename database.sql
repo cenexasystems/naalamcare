@@ -579,3 +579,9 @@ ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "promo_discount" numeric(12, 2) DEF
 -- ---------------------------------------------------------------------------
 
 ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "reward_choices" text DEFAULT '[]' NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 22. Batches removed from Inventory but kept for their bills and returns
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "batches" ADD COLUMN IF NOT EXISTS "archived" boolean DEFAULT false NOT NULL;

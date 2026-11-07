@@ -100,6 +100,8 @@ export type Batch = {
   stock_added: number;
   /** Remaining sellable units */
   stock_qty: number;
+  /** Removed from Inventory; kept so its bills, returns and reports stay intact */
+  archived: boolean;
   /** Purchase rate per pack */
   purchase_rate: number;
   /** MRP per pack (GST inclusive) */

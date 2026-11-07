@@ -114,6 +114,7 @@ export const Dashboard = ({
     for (const medicine of medicines) {
       stockQty += medicine.total_stock;
       for (const batch of medicine.batches) {
+        if (batch.archived) continue;
         stockValue += (batch.stock_qty / (batch.pack_size || 1)) * batch.purchase_rate;
         const state = expiryState(batch.exp_date);
         if (state === "EXPIRED") expired += 1;
@@ -156,6 +157,7 @@ export const Dashboard = ({
     const rows: { name: string; detail: string; tone: "red" | "amber" }[] = [];
     for (const medicine of medicines) {
       for (const batch of medicine.batches) {
+        if (batch.archived) continue;
         const state = expiryState(batch.exp_date);
         if (state === "EXPIRED")
           rows.push({

@@ -456,9 +456,10 @@ export const Inventory = ({
                               </button>
                               <button
                                 onClick={async () => {
-                                  if (confirm(`Delete batch ${batch.batch_no}?`)) {
+                                  const stockNote = batch.stock_qty > 0 ? ` Its ${batch.stock_qty} units left in stock will be written off.` : "";
+                                  if (confirm(`Delete batch ${batch.batch_no}?${stockNote} Bills already made keep it.`)) {
                                     const res = await act(deleteBatch(mode, batch.id));
-                                    if (res.ok) onChanged("Batch deleted.");
+                                    if (res.ok) onChanged(res.data.kept ? "Batch removed from Inventory. Its bills and reports are kept." : "Batch deleted.");
                                   }
                                 }}
                                 aria-label="Delete batch"

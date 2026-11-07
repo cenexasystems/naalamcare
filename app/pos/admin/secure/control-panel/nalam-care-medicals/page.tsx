@@ -182,6 +182,8 @@ function Workspace({
     if (denied) onAccessDenied();
   }, [denied, onAccessDenied]);
   const { data: batchRows = [], isLoading: batchLoading } = useBatchRows();
+  /** Batches still in Inventory. Removed ones stay in batchRows for purchase and supplier history. */
+  const liveBatchRows = useMemo(() => batchRows.filter((r) => !r.batch.archived), [batchRows]);
   const { data: bills = [], isLoading: billsLoading } = useBills();
   const { data: customers = [], isLoading: custLoading } = useCustomers();
   const { data: suppliers = [], isLoading: suppLoading } = useSuppliers();
@@ -339,7 +341,7 @@ function Workspace({
           {screen === "inventory" && (
             <Inventory
               medicines={medicines}
-              rows={batchRows}
+              rows={liveBatchRows}
               onChanged={notify}
               onAddStock={() => setScreen("purchase")}
               onViewExpiry={(tab) => {
@@ -374,7 +376,7 @@ function Workspace({
             />
           )}
 
-          {screen === "expiry" && <ExpiryAlert key={expiryTab} rows={batchRows} initialTab={expiryTab} />}
+          {screen === "expiry" && <ExpiryAlert key={expiryTab} rows={liveBatchRows} initialTab={expiryTab} />}
 
           {screen === "settings" && role === "admin" && (
             <SettingsPanel settings={settings} suppliers={suppliers} medicines={medicines} onChanged={notify} />
@@ -391,7 +393,7 @@ function Workspace({
         <LowStockNotice
           key={mode}
           mode={mode}
-          rows={batchRows}
+          rows={liveBatchRows}
           popup={settings.mode_settings.alert_popup}
           sound={settings.mode_settings.alert_sound}
           onView={() => {

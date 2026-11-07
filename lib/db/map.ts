@@ -79,6 +79,7 @@ export const mapBatch = (row: any): Batch => ({
   qty_packs: row.qtyPacks,
   stock_added: row.stockAdded,
   stock_qty: row.stockQty,
+  archived: Boolean(row.archived),
   purchase_rate: toNum(row.purchaseRate),
   mrp: toNum(row.mrp),
   selling_price: toNum(row.sellingPrice),

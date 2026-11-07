@@ -28,7 +28,7 @@ export const parseProductTypes = (raw: unknown): string[] => parseNameList(raw, 
 export const parsePurchaseUnits = (raw: unknown): string[] => parseNameList(raw, DEFAULT_PURCHASE_UNITS);
 
 /** Product types always bought and sold as single pieces (the General item behaviour). */
-const PIECE_PRODUCT_TYPES = ["general", "liquid", "bottle", "cartridge"];
+const PIECE_PRODUCT_TYPES = ["general", "liquid", "injection", "bottle", "cartridge"];
 export const isPieceProductType = (productType?: string): boolean =>
   PIECE_PRODUCT_TYPES.includes((productType || "").trim().toLowerCase());
 

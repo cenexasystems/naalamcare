@@ -56,9 +56,9 @@ const n = (v: unknown) => {
 /** The starting configuration (Tablet / Injection / General, three slabs). */
 export const defaultAutoDiscounts = (categoryNames: string[], enabled: boolean): AutoDiscountConfig => {
   const names = [...new Set(["Tablet", "Injection", "General", "Liquid", ...categoryNames])];
-  // Liquid starts at the Tablet rates; other categories at the General rate. Edit them in Settings.
+  // Liquid starts at the Tablet rates, Cartridge at the Injection rates, others at the General rate. Edit them in Settings.
   const rate = (name: string, tablet: number, injection: number, general: number) =>
-    name === "Tablet" || name === "Liquid" ? tablet : name === "Injection" ? injection : general;
+    name === "Tablet" || name === "Liquid" ? tablet : name === "Injection" || name === "Cartridge" ? injection : general;
   const rates = (t: number, i: number, g: number) => Object.fromEntries(names.map((nm) => [nm, rate(nm, t, i, g)]));
   return {
     enabled,
