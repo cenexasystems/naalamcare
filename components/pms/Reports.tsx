@@ -8,7 +8,7 @@ import { periodRange, type Period } from "@/lib/period";
 import { deleteBill } from "@/lib/actions";
 import { BILL_SUMMARY_SHEET, INVENTORY_SHEET, SALES_SHEET } from "./exports";
 import { downloadCsv, downloadExcel } from "@/lib/xlsx";
-import { Button, Card, Field, Modal, PageTitle, Select, StatTile, TextInput } from "./ui";
+import { Button, Card, Field, Modal, PageTitle, Select, StatTile, TextInput, PAGE_STEP, ShowMore } from "./ui";
 import { round2 } from "@/lib/calc";
 import { act, useMode } from "./mode-context";
 import { REPORT_OPTIONS, ReportTable, buildReport, reportSheet, type ReportKind } from "./ReportsExtras";
@@ -44,6 +44,8 @@ export const Reports = ({
 
   const [start, end] = startOf(period, from, to);
 
+  /** Bills listed; "Show more" adds the next 100 */
+  const [limit, setLimit] = useState(PAGE_STEP);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return bills.filter((bill) => {
@@ -256,7 +258,7 @@ export const Reports = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f1f3f5]">
-              {filtered.map((bill, index) => (
+              {filtered.slice(0, limit).map((bill, index) => (
                 <tr key={bill.id} className="transition hover:bg-[#fafbfc]">
                   <td className="td text-gray-500">{index + 1}</td>
                   <td className="td font-semibold text-gray-900">{bill.id}</td>
@@ -311,6 +313,7 @@ export const Reports = ({
             </tbody>
           </table>
         </div>
+        <ShowMore shown={Math.min(limit, filtered.length)} total={filtered.length} onMore={() => setLimit(limit + PAGE_STEP)} noun="bills" />
       </Card>
       )}
 

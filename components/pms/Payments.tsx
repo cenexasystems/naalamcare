@@ -8,7 +8,7 @@ import { round2 } from "@/lib/calc";
 import { unitPaidOf } from "@/lib/auto-discounts";
 import { formatReturnNo } from "@/lib/ids";
 import { cancelBill, createSalesReturn, recordCustomerPayment } from "@/lib/actions";
-import { Button, Card, Field, Modal, PageTitle, Pill, Select, StatTile, TextInput } from "./ui";
+import { Button, Card, Field, Modal, PAGE_STEP, PageTitle, Pill, Select, ShowMore, StatTile, TextInput } from "./ui";
 import { act, useMode } from "./mode-context";
 import { useSettings } from "./data";
 
@@ -46,6 +46,8 @@ export const Payments = ({
   const [search, setSearch] = useState("");
   const [paying, setPaying] = useState<Bill | null>(null);
   const [returning, setReturning] = useState<Bill | null>(null);
+  /** Invoices listed; "Show more" adds the next 100 */
+  const [limit, setLimit] = useState(PAGE_STEP);
 
   const today = todayIso();
   const stats = useMemo(() => {
@@ -167,7 +169,7 @@ export const Payments = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f1f3f5]">
-                  {filtered.map((bill) => {
+                  {filtered.slice(0, limit).map((bill) => {
                     const st = billStatus(bill, today);
                     const cancelled = bill.status === "CANCELLED";
                     const returnable = !cancelled && bill.items.some((i) => i.qty - i.returned_qty > 0);
@@ -259,6 +261,7 @@ export const Payments = ({
                 </tbody>
               </table>
             </div>
+            <ShowMore shown={Math.min(limit, filtered.length)} total={filtered.length} onMore={() => setLimit(limit + PAGE_STEP)} />
           </Card>
         </>
       )}

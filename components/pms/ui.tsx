@@ -332,3 +332,35 @@ export const Toast = ({ message, tone = "green" }: { message: string; tone?: "gr
     {message}
   </div>
 );
+
+/* --------------------------------------------------------------------------
+   Long lists show this many rows, plus a "Show more" button for the next lot.
+   -------------------------------------------------------------------------- */
+export const PAGE_STEP = 100;
+
+export const ShowMore = ({
+  shown,
+  total,
+  onMore,
+  noun = "invoices",
+}: {
+  shown: number;
+  total: number;
+  onMore: () => void;
+  noun?: string;
+}) =>
+  total > PAGE_STEP ? (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#eef1f3] px-4 py-3 text-[12.5px] text-gray-500">
+      <span>
+        Showing {shown} of {total} {noun}
+      </span>
+      {shown < total && (
+        <button
+          onClick={onMore}
+          className="cursor-pointer rounded-lg border border-[#d8dde3] bg-white px-4 py-2 text-[13px] font-semibold text-[var(--c-deep)] transition hover:bg-gray-50"
+        >
+          Show more ({Math.min(PAGE_STEP, total - shown)})
+        </button>
+      )}
+    </div>
+  ) : null;

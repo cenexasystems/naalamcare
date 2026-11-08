@@ -11,7 +11,7 @@ import { membershipOn } from "@/lib/membership";
 import { RegisterMembershipModal } from "./Membership";
 import { CUSTOMERS_SHEET } from "./exports";
 import { downloadExcel } from "@/lib/xlsx";
-import { Button, Card, Field, Modal, PageTitle, Pill, Select, TextInput } from "./ui";
+import { Button, Card, Field, Modal, PAGE_STEP, PageTitle, Pill, Select, ShowMore, TextInput } from "./ui";
 
 export const BUSINESS_TYPES = ["Retailer", "Medical Shop", "Clinic", "Hospital", "Distributor", "Other"];
 
@@ -32,6 +32,8 @@ export const Customers = ({
   const wholesale = mode === "wholesale";
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Customer | null>(null);
+  /** Bills listed in purchase history; "Show more" adds the next 100 */
+  const [historyLimit, setHistoryLimit] = useState(PAGE_STEP);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [adding, setAdding] = useState(false);
   const [registering, setRegistering] = useState<Customer | null>(null);
@@ -204,7 +206,10 @@ export const Customers = ({
                         </button>
                       )}
                       <button
-                        onClick={() => setSelected(customer)}
+                        onClick={() => {
+                    setSelected(customer);
+                    setHistoryLimit(PAGE_STEP);
+                  }}
                         aria-label="Purchase history"
                         className="cursor-pointer rounded-md p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-[var(--c-deep)]"
                       >
@@ -310,7 +315,10 @@ export const Customers = ({
                         </button>
                       )}
                 <button
-                  onClick={() => setSelected(customer)}
+                  onClick={() => {
+                    setSelected(customer);
+                    setHistoryLimit(PAGE_STEP);
+                  }}
                   aria-label="Purchase history"
                   className="cursor-pointer rounded-md p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-[var(--c-deep)]"
                 >
@@ -401,7 +409,7 @@ export const Customers = ({
             />
 
             <div className="max-h-[430px] overflow-y-auto">
-              {selectedHistory.map((bill) => (
+              {selectedHistory.slice(0, historyLimit).map((bill) => (
                 <div key={bill.id} className="mb-3 rounded-xl border border-[#e5e7eb]">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#f1f3f5] px-4 py-2.5">
                     <span className="text-[13px] font-bold text-gray-900">{bill.id}</span>
@@ -440,6 +448,12 @@ export const Customers = ({
                   No purchases recorded for this customer yet.
                 </p>
               )}
+              <ShowMore
+                shown={Math.min(historyLimit, selectedHistory.length)}
+                total={selectedHistory.length}
+                onMore={() => setHistoryLimit(historyLimit + PAGE_STEP)}
+                noun="bills"
+              />
             </div>
           </>
         )}
