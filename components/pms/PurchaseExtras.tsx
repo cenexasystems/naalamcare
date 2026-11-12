@@ -93,7 +93,7 @@ export const PurchaseOrders = ({
           <Field label="Supplier">
             <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
               <option value="">Select supplier</option>
-              {suppliers.map((s) => (
+              {suppliers.filter((s) => !s.archived || s.id === supplierId).map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
                 </option>

@@ -385,10 +385,15 @@ export async function saveSupplier(mode: Mode, payload: any): Promise<ActionResu
       return payload.id as string;
     }
     const clash = await db
-      .select({ id: schema.suppliers.id })
+      .select({ id: schema.suppliers.id, archived: schema.suppliers.archived })
       .from(schema.suppliers)
       .where(sql`lower(${schema.suppliers.name}) = lower(${name})`)
       .limit(1);
+    // Adding back a removed supplier brings back the same record, with its history.
+    if (clash.length && clash[0].archived) {
+      await db.update(schema.suppliers).set({ ...values, archived: false }).where(eq(schema.suppliers.id, clash[0].id));
+      return clash[0].id;
+    }
     if (clash.length) fail(`${name} is already in the supplier directory.`);
     // mode stays NULL: the directory is shared by retail and wholesale.
     const res = await db.insert(schema.suppliers).values(values).returning({ id: schema.suppliers.id });
@@ -396,7 +401,7 @@ export async function saveSupplier(mode: Mode, payload: any): Promise<ActionResu
   });
 }
 
-export async function deleteSupplier(mode: Mode, id: string): Promise<ActionResult<null>> {
+export async function deleteSupplier(mode: Mode, id: string): Promise<ActionResult<{ kept: boolean }>> {
   return run(async () => {
     await requireMode(mode, { admin: true });
     const [bought, paid, ordered, returned] = await Promise.all([
@@ -405,12 +410,16 @@ export async function deleteSupplier(mode: Mode, id: string): Promise<ActionResu
       db.select({ id: schema.purchaseOrders.id }).from(schema.purchaseOrders).where(eq(schema.purchaseOrders.supplierId, id)).limit(1),
       db.select({ id: schema.purchaseReturns.id }).from(schema.purchaseReturns).where(eq(schema.purchaseReturns.supplierId, id)).limit(1),
     ]);
-    // History in either mode keeps the shared record, so balances never lose their supplier.
-    if (bought.length || paid.length || ordered.length || returned.length)
-      fail("This supplier has purchase or payment history (retail or wholesale) and can't be deleted.");
+    // With history (either mode) the record is kept but removed from the lists, so old purchases,
+    // payments and reports keep their supplier name.
+    if (bought.length || paid.length || ordered.length || returned.length) {
+      const res = await db.update(schema.suppliers).set({ archived: true }).where(eq(schema.suppliers.id, id)).returning({ id: schema.suppliers.id });
+      if (!res.length) fail("That supplier no longer exists.");
+      return { kept: true };
+    }
     const res = await db.delete(schema.suppliers).where(eq(schema.suppliers.id, id)).returning({ id: schema.suppliers.id });
     if (!res.length) fail("That supplier no longer exists.");
-    return null;
+    return { kept: false };
   });
 }
 

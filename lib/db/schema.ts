@@ -38,6 +38,8 @@ export const suppliers = pgTable("suppliers", {
   /** "retail" | "wholesale" | NULL (legacy, awaiting reconciliation) */
   mode: text("mode"),
   address: text("address").notNull().default(""),
+  /** Removed from the lists but kept, because purchases / payments refer to it */
+  archived: boolean("archived").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

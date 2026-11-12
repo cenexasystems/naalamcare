@@ -369,7 +369,7 @@ export const SettingsPanel = ({
             </Button>
           </div>
           <div className="divide-y divide-[#f1f3f5]">
-            {suppliers.map((supplier) => (
+            {suppliers.filter((s) => !s.archived).map((supplier) => (
               <div key={supplier.id} className="flex items-center gap-3 py-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13.5px] font-medium text-gray-900">{supplier.name}</p>
@@ -388,7 +388,7 @@ export const SettingsPanel = ({
                   onClick={async () => {
                     if (confirm(`Delete ${supplier.name}?`)) {
                       const res = await act(deleteSupplier(mode, supplier.id));
-                      if (res.ok) onChanged("Supplier deleted.");
+                      if (res.ok) onChanged(res.data.kept ? `${supplier.name} removed. Its purchases and payments are kept.` : "Supplier deleted.");
                     }
                   }}
                   aria-label="Delete supplier"
@@ -398,7 +398,7 @@ export const SettingsPanel = ({
                 </button>
               </div>
             ))}
-            {!suppliers.length && (
+            {!suppliers.some((s) => !s.archived) && (
               <p className="py-10 text-center text-[13px] text-gray-400">No suppliers yet.</p>
             )}
           </div>

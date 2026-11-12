@@ -119,6 +119,7 @@ export const mapSupplier = (row: any): Supplier => ({
   gstin: row.gstin,
   address: row.address || "",
   mode: modeOrNull(row.mode),
+  archived: Boolean(row.archived),
   created_at: row.createdAt.toISOString(),
 });
 

@@ -645,3 +645,10 @@ ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "member_discount" numeric(12, 2) DE
 ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "member_no" text DEFAULT '' NOT NULL;
 ALTER TABLE "bills" ADD COLUMN IF NOT EXISTS "member_plan" text DEFAULT '' NOT NULL;
 ALTER TABLE "bill_items" ADD COLUMN IF NOT EXISTS "member_discount" numeric(12, 2) DEFAULT '0' NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 24. Suppliers with purchase / payment history are removed from the lists
+--     (archived) instead of deleted, so their records keep the supplier.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE "suppliers" ADD COLUMN IF NOT EXISTS "archived" boolean DEFAULT false NOT NULL;

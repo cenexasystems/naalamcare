@@ -71,7 +71,11 @@ export const Suppliers = ({
   const [adding, setAdding] = useState(false);
   const [viewing, setViewing] = useState<string | null>(null);
 
-  const accounts = useMemo(() => buildAccounts(suppliers, batchRows, ledger), [suppliers, batchRows, ledger]);
+  // Removed suppliers drop off the list once nothing is owed either way.
+  const accounts = useMemo(
+    () => buildAccounts(suppliers, batchRows, ledger).filter((a) => !a.supplier.archived || Math.abs(a.outstanding) >= 0.01),
+    [suppliers, batchRows, ledger],
+  );
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return accounts;
@@ -174,7 +178,10 @@ export const Suppliers = ({
               {filtered.map((a, index) => (
                 <tr key={a.supplier.id} className="transition hover:bg-[#fafbfc]">
                   <td className="td text-gray-500">{index + 1}</td>
-                  <td className="td font-medium text-gray-900">{a.supplier.name}</td>
+                  <td className="td font-medium text-gray-900">
+                    {a.supplier.name}
+                    {a.supplier.archived && <span className="ml-2 text-[11px] font-normal text-gray-400">(removed — balance pending)</span>}
+                  </td>
                   <td className="td">{a.supplier.phone || "—"}</td>
                   <td className="td">{a.supplier.gstin || "—"}</td>
                   <td className="td text-right">{amount(a.purchased)}</td>
@@ -204,7 +211,7 @@ export const Suppliers = ({
                         onClick={async () => {
                           if (!confirm(`Delete ${a.supplier.name}?`)) return;
                           const res = await act(deleteSupplier(mode, a.supplier.id));
-                          if (res.ok) onChanged("Supplier deleted.");
+                          if (res.ok) onChanged(res.data.kept ? `${a.supplier.name} removed. Its purchases and payments are kept.` : "Supplier deleted.");
                         }}
                         aria-label="Delete supplier"
                         className="cursor-pointer rounded-md p-1.5 text-gray-500 transition hover:bg-red-50 hover:text-red-600"

@@ -58,6 +58,8 @@ export type Supplier = {
   gstin: string;
   address: string;
   mode: Mode | null;
+  /** Removed from the lists; kept for its purchases and payments */
+  archived?: boolean;
   created_at: string;
 };
 

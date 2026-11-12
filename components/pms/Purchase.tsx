@@ -329,7 +329,7 @@ export const Purchase = ({
                 value={form.supplierName || suppliers.find((s) => s.id === form.supplierId)?.name || ""}
                 onChange={(e) => {
                   const typed = e.target.value;
-                  const match = suppliers.find((s) => s.name.toLowerCase() === typed.toLowerCase());
+                  const match = suppliers.find((s) => !s.archived && s.name.toLowerCase() === typed.toLowerCase());
                   setForm((prev) => ({
                     ...prev,
                     supplierName: typed,
@@ -340,7 +340,7 @@ export const Purchase = ({
                 className="h-11 w-full rounded-lg border border-[#dfe3e7] px-3 text-[13px] outline-none transition placeholder:text-gray-300 focus:border-[var(--c-primary)] focus:ring-2 focus:ring-[var(--c-primary)]/12"
               />
               <datalist id="supplier-list">
-                {suppliers.map((s) => (
+                {suppliers.filter((s) => !s.archived).map((s) => (
                   <option key={s.id} value={s.name} />
                 ))}
               </datalist>
