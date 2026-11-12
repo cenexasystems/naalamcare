@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import type { Batch, Bill, CartLine, Customer, DiscountTier, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
 import { calcBillOffer, calcBillTotals, calcIncludedGst, round2 } from "@/lib/calc";
-import { calcMemberDiscount, memberForBill, membershipOn } from "@/lib/membership";
+import { calcMemberDiscount, memberForBill, memberOnlyApplies, membershipOn } from "@/lib/membership";
 import { MemberBillPanel } from "./Membership";
 import { calcAutoDiscounts, slabRange } from "@/lib/auto-discounts";
 import { amount, money, monthShort, stockBreakdown, todayIso, unitNoun, type SellBy } from "@/lib/format";
@@ -316,11 +316,20 @@ export const WholesaleBilling = ({
     [autoConfig, priced],
   );
   const afterType = round2(totals.grandTotal - (auto?.total ?? 0));
-  const billOffer = calcBillOffer(autoConfig?.enabled ? [] : (ms?.bill_offers ?? []), afterType);
   // Membership (optional, Settings → Membership → Enable Wholesale): its own step after the above.
+  // On a members-only bill there are no bill offers, just the membership discount.
   const { data: memberData } = useMemberships();
   const memberEnabled = membershipOn(memberData?.settings, "wholesale");
   const memberInfo = memberForBill(memberEnabled ? memberData : undefined, customer?.id, billDate);
+  const memberOnly = Boolean(
+    memberEnabled &&
+      memberData &&
+      memberInfo.usable &&
+      memberInfo.plan &&
+      auto &&
+      memberOnlyApplies(memberInfo.plan, memberData.settings, priced.map((l, i) => ({ category: auto.lines[i].category, amount: round2(l.per_unit_price * l.qty) }))),
+  );
+  const billOffer = calcBillOffer(autoConfig?.enabled || memberOnly ? [] : (ms?.bill_offers ?? []), afterType);
   const memberCalc =
     memberEnabled && memberData && memberInfo.usable && memberInfo.plan && auto
       ? calcMemberDiscount(

@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import type { Batch, Bill, CartLine, HeldBill, MedicineWithBatches, PaymentMethod } from "@/lib/types";
 import { calcBillOffer, calcBillTotals, calcDiscountPercent, calcIncludedGst, round2 } from "@/lib/calc";
-import { calcAutoDiscounts, slabRange } from "@/lib/auto-discounts";
+import { calcAutoDiscounts, categoryFor, slabRange } from "@/lib/auto-discounts";
 import { amount, expiryState, money, monthShort, sellByOptions, stockBreakdown, unitNoun, todayIso, type SellBy } from "@/lib/format";
 import { offerBadge, planOffers, rewardUnitPrice } from "@/lib/offers";
 import { listHeldBills, saveHeldBills } from "@/lib/store";
@@ -29,7 +29,7 @@ import { Button, Card, Pill, ScheduleBadge, ScreenHeading, Select } from "./ui";
 import { CustomerModal, type CustomerPayload } from "./CustomerModal";
 import { act, useMode } from "./mode-context";
 import { mutateAll, useBills, useCustomers, useMemberships, useSettings } from "./data";
-import { calcMemberDiscount, memberForBill, membershipOn } from "@/lib/membership";
+import { calcMemberDiscount, memberForBill, memberOnlyApplies, membershipOn } from "@/lib/membership";
 import { MemberBillPanel } from "./Membership";
 import { ReturnModal } from "./Payments";
 
@@ -253,6 +253,28 @@ export const Billing = ({
     clearSelection();
   };
 
+  /* ------------------------------ membership ----------------------------- */
+  const { data: memberData } = useMemberships();
+  const { data: allCustomers = [] } = useCustomers();
+  const memberEnabled = membershipOn(memberData?.settings, mode);
+  const billCustomer = memberEnabled
+    ? allCustomers.find((c) => (billCust.id ? c.id === billCust.id : billCust.phone.length >= 6 && c.phone === billCust.phone)) ?? null
+    : null;
+  const memberInfo = memberForBill(memberData, billCustomer?.id, billDate);
+  /** Members-only bill: just the membership discount — no offers, gifts, automatic or bill-offer discounts */
+  const memberOnly = Boolean(
+    memberEnabled &&
+      memberData &&
+      memberInfo.usable &&
+      memberInfo.plan &&
+      settings &&
+      memberOnlyApplies(
+        memberInfo.plan,
+        memberData.settings,
+        lines.map((l) => ({ category: categoryFor(settings.mode_settings.auto_discounts, l.product_type), amount: round2(l.per_unit_price * l.qty) })),
+      ),
+  );
+
   /* ------------------------- offers & promotions ------------------------- */
   // Preview of what the server works out when the bill is saved — same rules, same stock checks.
   // (Per-customer / total limits are checked by the server.)
@@ -263,7 +285,7 @@ export const Billing = ({
   const [offerChoices, setOfferChoices] = useState<Record<string, string>>({});
   const offerPlan = useMemo(() => {
     const offerList = settings?.offers ?? [];
-    if (!offerList.length || !lines.length) return null;
+    if (memberOnly || !offerList.length || !lines.length) return null;
     const byId = new Map(medicines.map((m) => [m.id, m]));
     const live = (id: string) =>
       (byId.get(id)?.batches ?? [])
@@ -307,7 +329,7 @@ export const Billing = ({
       };
     });
     return { ...plan, rewards };
-  }, [settings?.offers, medicines, lines, billDate, paidSubtotal, acceptedOffers, offerChoices]);
+  }, [settings?.offers, medicines, lines, billDate, paidSubtotal, acceptedOffers, offerChoices, memberOnly]);
   const rewardRows = offerPlan?.rewards ?? [];
   const freeItems = rewardRows.filter((r) => r.unitPrice <= 0);
   const paidRewards = rewardRows.filter((r) => r.unitPrice > 0 && r.units > 0);
@@ -367,7 +389,7 @@ export const Billing = ({
     () =>
       autoConfig
         ? calcAutoDiscounts(
-            autoConfig,
+            memberOnly ? { ...autoConfig, enabled: false } : autoConfig,
             charged.map((c) => ({
               product_type: c.product_type,
               amount: round2(c.per_unit_price * c.qty - c.promo),
@@ -375,19 +397,12 @@ export const Billing = ({
             })),
           )
         : null,
-    [autoConfig, charged],
+    [autoConfig, charged, memberOnly],
   );
   const autoTotal = auto?.total ?? 0;
   const afterType = round2(totals.grandTotal - promoTotal - autoTotal);
-  const billOffer = calcBillOffer(autoConfig?.enabled ? [] : (settings?.mode_settings.bill_offers ?? []), afterType);
-  // Membership (optional): its own step after the discounts above, which it never changes.
-  const { data: memberData } = useMemberships();
-  const { data: allCustomers = [] } = useCustomers();
-  const memberEnabled = membershipOn(memberData?.settings, mode);
-  const billCustomer = memberEnabled
-    ? allCustomers.find((c) => (billCust.id ? c.id === billCust.id : billCust.phone.length >= 6 && c.phone === billCust.phone)) ?? null
-    : null;
-  const memberInfo = memberForBill(memberData, billCustomer?.id, billDate);
+  const billOffer = calcBillOffer(autoConfig?.enabled || memberOnly ? [] : (settings?.mode_settings.bill_offers ?? []), afterType);
+  // Membership (optional): its own step after the discounts above.
   const memberCalc =
     memberEnabled && memberData && memberInfo.usable && memberInfo.plan && auto
       ? calcMemberDiscount(
@@ -408,7 +423,7 @@ export const Billing = ({
   const manualBlocked = autoTotal > 0 && autoConfig?.allow_manual === false;
   /** The next bigger slab and how much more the bill needs to reach it */
   const nextSlab = useMemo(() => {
-    if (!autoConfig?.enabled || !auto || !lines.length) return null;
+    if (memberOnly || !autoConfig?.enabled || !auto || !lines.length) return null;
     const up = autoConfig.slabs.find((s) => s.enabled && s.min > auto.subtotal);
     return up ? { slab: up, shortBy: round2(up.min - auto.subtotal) } : null;
   }, [autoConfig, auto, lines.length]);
@@ -1151,7 +1166,9 @@ export const Billing = ({
                 </span>
               )}
             </p>
-            {!autoConfig?.enabled ? (
+            {memberOnly ? (
+              <p className="text-[11.5px] text-gray-500">Member bill — the membership discount applies instead of offers and automatic discounts.</p>
+            ) : !autoConfig?.enabled ? (
               <p className="text-[11.5px] text-gray-500">Switched off for this dashboard (Settings → Automatic Discounts).</p>
             ) : !lines.length ? (
               <p className="text-[11.5px] text-gray-500">Applies as soon as items are added.</p>

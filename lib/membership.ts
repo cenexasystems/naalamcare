@@ -40,6 +40,8 @@ export type MembershipSettings = {
   default_categories: string[];
   /** Member discount % per category (e.g. Tablet 22). A category not listed uses its plan's Discount %. */
   category_rates: Record<string, number>;
+  /** Members get only the membership discount: no offers, free gifts, automatic or bill-offer discounts */
+  members_only: boolean;
   /** Member discount on top of existing discounts (else the bigger of the two) */
   allow_combine: boolean;
   /** Show "expiring soon" this many days before expiry */
@@ -63,6 +65,7 @@ export const DEFAULT_MEMBERSHIP_SETTINGS: MembershipSettings = {
   default_max_discount: 0,
   default_categories: [],
   category_rates: {},
+  members_only: true,
   allow_combine: false,
   reminder_days: 30,
   grace_days: 0,
@@ -104,6 +107,7 @@ export const normaliseMembershipSettings = (raw: unknown): MembershipSettings =>
         .filter(([k, v]) => k.trim() && v !== null && String(v) !== "" && Number.isFinite(Number(v)))
         .map(([k, v]) => [k.trim(), Math.min(100, Math.max(0, r2(n(v))))]),
     ),
+    members_only: d.members_only ?? D.members_only,
     allow_combine: d.allow_combine ?? D.allow_combine,
     reminder_days: whole(d.reminder_days ?? D.reminder_days),
     grace_days: whole(d.grace_days ?? D.grace_days),
@@ -277,6 +281,19 @@ export const memberRate = (
   const key = Object.keys(rates ?? {}).find((k) => k.toLowerCase() === category.toLowerCase());
   return key !== undefined ? n(rates![key]) : n(plan.discount_percent);
 };
+
+/**
+ * Is this a members-only bill? Yes when "members get only the membership discount" is on and the
+ * membership actually gives a discount on these items (minimum bill met, eligible items). Then the
+ * bill skips offers, free gifts, automatic and bill-offer discounts; otherwise it's priced as usual.
+ */
+export const memberOnlyApplies = (
+  plan: Pick<MembershipPlan, "discount_percent" | "min_bill" | "max_discount" | "categories">,
+  s: Pick<MembershipSettings, "members_only" | "category_rates">,
+  lines: { category: string; amount: number }[],
+): boolean =>
+  s.members_only &&
+  calcMemberDiscount(plan, { allow_combine: true, category_rates: s.category_rates }, lines.map((l) => ({ ...l, auto: 0 }))).discount > 0;
 
 /** "Tablet 22% · Injection 20% · others 10%" — what a plan gives, for the screens. */
 export const planRatesLabel = (

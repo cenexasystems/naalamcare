@@ -8,6 +8,7 @@ import { calcBillOffer, calcBillTotals, calcIncludedGst, round2 } from "./calc";
 import {
   billLineNets,
   calcAutoDiscounts,
+  categoryFor,
   normaliseAutoDiscounts,
   slabRange,
   validateAutoDiscounts,
@@ -19,6 +20,7 @@ import {
   MEMBER_METHODS,
   calcMemberDiscount,
   canRenew,
+  memberOnlyApplies,
   memberStatus,
   membershipOn,
   normaliseMembershipSettings,
@@ -1384,6 +1386,39 @@ export async function submitBill(
         }
       }
 
+      /* ------------------------------- membership ------------------------------- */
+      // Only when the counter applied one; re-checked here against the saved records. On a
+      // members-only bill the customer gets just the membership discount: no offers, free gifts,
+      // automatic or bill-offer discounts (Settings → Membership).
+      let memberRow: typeof schema.memberships.$inferSelect | null = null;
+      let memberPlan: ReturnType<typeof mapMembershipPlan> | null = null;
+      let memberSettings: ReturnType<typeof normaliseMembershipSettings> | null = null;
+      let memberOnly = false;
+      const membershipId = str(payload.membership_id);
+      if (membershipId) {
+        memberSettings = normaliseMembershipSettings(
+          (await tx.select({ raw: schema.settings.membershipSettings }).from(schema.settings).where(eq(schema.settings.id, 1)).limit(1))[0]?.raw ?? "",
+        );
+        if (!membershipOn(memberSettings, mode)) fail("Membership is switched off for this dashboard.");
+        const rows = await tx
+          .select({ m: schema.memberships, p: schema.membershipPlans })
+          .from(schema.memberships)
+          .innerJoin(schema.membershipPlans, eq(schema.membershipPlans.id, schema.memberships.planId))
+          .where(and(eq(schema.memberships.id, membershipId), eq(schema.memberships.mode, mode)))
+          .limit(1);
+        if (!rows.length) fail("That membership isn't in this dashboard.");
+        memberRow = rows[0].m;
+        if (!customer || memberRow.customerId !== customer.id) fail("That membership belongs to another customer.");
+        const status = memberStatus(mapMembership(memberRow, "", ""), billDate, memberSettings);
+        if (!statusGivesDiscount(status)) fail("This membership can't be used right now (" + status.toLowerCase() + "). Remove it from the bill or renew it.");
+        memberPlan = mapMembershipPlan(rows[0].p);
+        memberOnly = memberOnlyApplies(
+          memberPlan,
+          memberSettings,
+          priced.map((p) => ({ category: categoryFor(autoConfig, p.med.productType), amount: round2(p.perUnit * p.qty) })),
+        );
+      }
+
       /* --------------------------- offers & promotions (retail) --------------------------- */
       // Worked out here from the saved offers and their limits — never from the counter (it only
       // says which "counter-accepted" offers it accepted). Reward items come off stock like any sale
@@ -1396,7 +1431,7 @@ export async function submitBill(
         costPerUnit: number;
         offer: Offer;
       }[] = [];
-      if (mode === "retail") {
+      if (mode === "retail" && !memberOnly) {
         const offerRows = await tx.select().from(schema.offers).where(and(eq(schema.offers.mode, mode), eq(schema.offers.active, true)));
         if (offerRows.length) {
           const offerList = offerRows.map(mapOffer);
@@ -1514,7 +1549,7 @@ export async function submitBill(
       // that offer allows it; 3) bill offers, only while automatic discounts are off; 4) the
       // counter's manual discount, within its cap.
       const auto = calcAutoDiscounts(
-        autoConfig,
+        memberOnly ? { ...autoConfig, enabled: false } : autoConfig,
         priced.map((p) => ({
           product_type: p.med.productType,
           amount: round2(p.perUnit * p.qty - p.promo),
@@ -1523,30 +1558,13 @@ export async function submitBill(
       );
       const afterPromo = round2(totals.grandTotal - promoTotal);
       const afterAuto = round2(afterPromo - auto.total);
-      const offerDiscount = autoConfig.enabled ? 0 : calcBillOffer(settings.bill_offers, afterAuto).discount;
+      const offerDiscount = autoConfig.enabled || memberOnly ? 0 : calcBillOffer(settings.bill_offers, afterAuto).discount;
       const afterBillOffer = round2(afterAuto - offerDiscount);
-      // Membership: only when the counter applied one, re-checked here against the saved records.
+      // Membership discount: its own step, after the discounts above.
       let member: MemberDiscount | null = null;
-      let memberRow: typeof schema.memberships.$inferSelect | null = null;
-      const membershipId = str(payload.membership_id);
-      if (membershipId) {
-        const memberSettings = normaliseMembershipSettings(
-          (await tx.select({ raw: schema.settings.membershipSettings }).from(schema.settings).where(eq(schema.settings.id, 1)).limit(1))[0]?.raw ?? "",
-        );
-        if (!membershipOn(memberSettings, mode)) fail("Membership is switched off for this dashboard.");
-        const rows = await tx
-          .select({ m: schema.memberships, p: schema.membershipPlans })
-          .from(schema.memberships)
-          .innerJoin(schema.membershipPlans, eq(schema.membershipPlans.id, schema.memberships.planId))
-          .where(and(eq(schema.memberships.id, membershipId), eq(schema.memberships.mode, mode)))
-          .limit(1);
-        if (!rows.length) fail("That membership isn't in this dashboard.");
-        memberRow = rows[0].m;
-        if (!customer || memberRow.customerId !== customer.id) fail("That membership belongs to another customer.");
-        const status = memberStatus(mapMembership(memberRow, "", ""), billDate, memberSettings);
-        if (!statusGivesDiscount(status)) fail("This membership can't be used right now (" + status.toLowerCase() + "). Remove it from the bill or renew it.");
+      if (memberRow && memberPlan && memberSettings) {
         member = calcMemberDiscount(
-          mapMembershipPlan(rows[0].p),
+          memberPlan,
           memberSettings,
           priced.map((p, i) => ({
             category: auto.lines[i].category,

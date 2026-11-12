@@ -875,7 +875,7 @@ const MembershipSettingsForm = ({
   const mode = useMode();
   const [s, setS] = useState(settings);
   const [saving, setSaving] = useState(false);
-  const flip = (key: "enabled" | "retail" | "wholesale" | "allow_multiple_plans" | "allow_combine" | "allow_renew_after_expiry") => setS({ ...s, [key]: !s[key] });
+  const flip = (key: "enabled" | "retail" | "wholesale" | "allow_multiple_plans" | "members_only" | "allow_combine" | "allow_renew_after_expiry") => setS({ ...s, [key]: !s[key] });
   const num = (key: keyof MembershipSettings) => ({
     type: "number",
     min: 0,
@@ -959,6 +959,18 @@ const MembershipSettingsForm = ({
           </Field>
         </div>
         <div className="mt-3">
+          <SettingSwitch
+            on={s.members_only}
+            label="Members get only the membership discount"
+            hint={
+              s.members_only
+                ? "On: members get no offers, free gifts or automatic discounts — only their membership discount"
+                : "Off: members also get offers; the membership discount works with the automatic discount as below"
+            }
+            onToggle={() => flip("members_only")}
+          />
+        </div>
+        <div className={`mt-2 ${s.members_only ? "opacity-50" : ""}`}>
           <SettingSwitch
             on={s.allow_combine}
             label="Combine with existing discounts"
