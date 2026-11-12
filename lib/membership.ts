@@ -38,6 +38,8 @@ export type MembershipSettings = {
   default_min_bill: number;
   default_max_discount: number;
   default_categories: string[];
+  /** Member discount % per category (e.g. Tablet 22). A category not listed uses its plan's Discount %. */
+  category_rates: Record<string, number>;
   /** Member discount on top of existing discounts (else the bigger of the two) */
   allow_combine: boolean;
   /** Show "expiring soon" this many days before expiry */
@@ -60,6 +62,7 @@ export const DEFAULT_MEMBERSHIP_SETTINGS: MembershipSettings = {
   default_min_bill: 0,
   default_max_discount: 0,
   default_categories: [],
+  category_rates: {},
   allow_combine: false,
   reminder_days: 30,
   grace_days: 0,
@@ -96,6 +99,11 @@ export const normaliseMembershipSettings = (raw: unknown): MembershipSettings =>
     default_min_bill: Math.max(0, r2(n(d.default_min_bill))),
     default_max_discount: Math.max(0, r2(n(d.default_max_discount))),
     default_categories: Array.isArray(d.default_categories) ? d.default_categories.filter((c) => typeof c === "string") : [],
+    category_rates: Object.fromEntries(
+      Object.entries(d.category_rates && typeof d.category_rates === "object" ? d.category_rates : {})
+        .filter(([k, v]) => k.trim() && v !== null && String(v) !== "" && Number.isFinite(Number(v)))
+        .map(([k, v]) => [k.trim(), Math.min(100, Math.max(0, r2(n(v))))]),
+    ),
     allow_combine: d.allow_combine ?? D.allow_combine,
     reminder_days: whole(d.reminder_days ?? D.reminder_days),
     grace_days: whole(d.grace_days ?? D.grace_days),
@@ -260,6 +268,30 @@ export const memberForBill = (
 
 /* -------------------------------- discount ------------------------------- */
 
+/** A category's member discount %: its rate in Settings → Membership, else the plan's Discount %. */
+export const memberRate = (
+  plan: Pick<MembershipPlan, "discount_percent">,
+  rates: Record<string, number> | undefined,
+  category: string,
+): number => {
+  const key = Object.keys(rates ?? {}).find((k) => k.toLowerCase() === category.toLowerCase());
+  return key !== undefined ? n(rates![key]) : n(plan.discount_percent);
+};
+
+/** "Tablet 22% · Injection 20% · others 10%" — what a plan gives, for the screens. */
+export const planRatesLabel = (
+  plan: Pick<MembershipPlan, "discount_percent" | "categories">,
+  rates: Record<string, number> | undefined,
+): string => {
+  const list = Object.entries(rates ?? {}).filter(
+    ([c]) => !plan.categories.length || plan.categories.some((p) => p.toLowerCase() === c.toLowerCase()),
+  );
+  if (!list.length) return `${plan.discount_percent}% off`;
+  const parts = list.map(([c, r]) => `${c} ${r}%`);
+  if (plan.discount_percent > 0) parts.push(`others ${plan.discount_percent}%`);
+  return parts.join(" · ");
+};
+
 export type MemberLine = {
   /** The line's discount category */
   category: string;
@@ -283,7 +315,7 @@ export type MemberDiscount = {
 /** The member discount on a bill. `otherBillDiscount` = bill-wide discounts already given (bill offers). */
 export const calcMemberDiscount = (
   plan: Pick<MembershipPlan, "discount_percent" | "min_bill" | "max_discount" | "categories">,
-  s: Pick<MembershipSettings, "allow_combine">,
+  s: Pick<MembershipSettings, "allow_combine"> & { category_rates?: Record<string, number> },
   lines: MemberLine[],
   otherBillDiscount = 0,
 ): MemberDiscount => {
@@ -293,17 +325,21 @@ export const calcMemberDiscount = (
   const wanted = plan.categories.map((c) => c.toLowerCase());
   const eligible = lines.map((l) => !l.excluded && n(l.amount) > 0 && (!wanted.length || wanted.includes(l.category.toLowerCase())));
   if (!eligible.some(Boolean)) return none("no-eligible");
-  const pct = Math.min(100, Math.max(0, n(plan.discount_percent))) / 100;
+  // Each line at its category's member rate (Settings → Membership), else the plan's Discount %.
+  const pct = lines.map((l) => Math.min(100, Math.max(0, memberRate(plan, s.category_rates, l.category))) / 100);
+  if (!lines.some((_, i) => eligible[i] && pct[i] > 0)) return none("no-eligible");
   // What each eligible line can still give: never more than it costs after its automatic discount.
   const room = lines.map((l, i) => (eligible[i] ? Math.max(0, n(l.amount) - n(l.auto)) : 0));
   const roomTotal = room.reduce((t, x) => t + x, 0);
-  let total: number;
-  if (s.allow_combine) {
-    total = roomTotal * pct;
-  } else {
-    const gross = lines.reduce((t, l, i) => t + (eligible[i] ? n(l.amount) : 0), 0) * pct;
-    const already = lines.reduce((t, l, i) => t + (eligible[i] ? n(l.auto) : 0), 0) + Math.max(0, n(otherBillDiscount));
-    total = gross - already;
+  // Combining: the rate on what's left after the automatic discount. Not combining: each item gets
+  // the bigger of its automatic and member discount, so only the difference is added.
+  const weight = lines.map((l, i) =>
+    !eligible[i] ? 0 : s.allow_combine ? room[i] * pct[i] : Math.max(0, n(l.amount) * pct[i] - n(l.auto)),
+  );
+  const weightTotal = weight.reduce((t, x) => t + x, 0);
+  let total = weightTotal;
+  if (!s.allow_combine) {
+    total = weightTotal - Math.max(0, n(otherBillDiscount));
     if (r2(total) <= 0) return none("existing-better");
   }
   total = r2(total);
@@ -311,13 +347,14 @@ export const calcMemberDiscount = (
   // Bill-wide discounts already came off, so the bill can never go below zero.
   total = r2(Math.min(total, Math.max(0, roomTotal - Math.max(0, n(otherBillDiscount)))));
   if (total <= 0 || roomTotal <= 0) return none("no-eligible");
-  // Share across eligible lines by what they cost; the last takes the rounding paisa.
-  const last = room.reduce((at, x, i) => (x > 0 ? i : at), -1);
+  if (weightTotal <= 0) return none("existing-better");
+  // Share across lines by what each one earned; the last takes the rounding paisa.
+  const last = weight.reduce((at, x, i) => (x > 0 ? i : at), -1);
   let given = 0;
-  const out = room.map((x, i) => {
+  const out = weight.map((x, i) => {
     if (x <= 0) return 0;
     if (i === last) return r2(total - given);
-    const part = r2((total * x) / roomTotal);
+    const part = r2((total * x) / weightTotal);
     given = r2(given + part);
     return part;
   });

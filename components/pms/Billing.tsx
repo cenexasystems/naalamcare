@@ -1200,7 +1200,7 @@ export const Billing = ({
               />
             )}
             {memberDiscount > 0 && (
-              <Row label={`Member discount (${memberInfo.plan?.name}, ${memberInfo.plan?.discount_percent}%)`} value={`− ${money(memberDiscount)}`} tone="green" />
+              <Row label={`Member discount (${memberInfo.plan?.name})`} value={`− ${money(memberDiscount)}`} tone="green" />
             )}
             {extraDiscount > 0 && (
               <Row

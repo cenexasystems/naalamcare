@@ -2435,7 +2435,7 @@ export async function saveMembershipPlan(mode: Mode, payload: any): Promise<Acti
     const validityValue = int(payload?.validity_value);
     const validityUnit = payload?.validity_unit === "days" || payload?.validity_unit === "months" ? payload.validity_unit : "years";
     if (fee < 0 || minBill < 0 || maxDiscount < 0) fail("Amounts can't be negative.");
-    if (percent <= 0 || percent > 100) fail("Discount must be more than 0% and at most 100%.");
+    if (percent < 0 || percent > 100) fail("Discount must be between 0% and 100%.");
     if (validityValue < 1) fail("Validity must be at least 1.");
     const active = payload?.active !== false;
     const id = str(payload?.id);

@@ -1020,7 +1020,7 @@ export const WholesaleBilling = ({
               />
             )}
             {memberDiscount > 0 && (
-              <Row label={`Member discount (${memberInfo.plan?.name}, ${memberInfo.plan?.discount_percent}%)`} value={`− ${money(memberDiscount)}`} green />
+              <Row label={`Member discount (${memberInfo.plan?.name})`} value={`− ${money(memberDiscount)}`} green />
             )}
             <Row label="Taxable Amount" value={money(memberGst !== null ? round2(afterType - memberDiscount - memberGst) : totals.taxableAmount)} />
             <Row label={`GST (${totals.gstPercent || 0}%)`} value={money(memberGst ?? totals.gstAmount)} />

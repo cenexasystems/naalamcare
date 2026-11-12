@@ -10,6 +10,7 @@ import {
   memberForBill,
   memberStatus,
   periodEnd,
+  planRatesLabel,
   renewalFee,
   renewalPeriod,
   statusGivesDiscount,
@@ -169,7 +170,7 @@ export const RegisterMembershipModal = ({
               <option value="">Select a plan</option>
               {plans.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} — {money(p.fee)} · {validityLabel(p.validity_value, p.validity_unit)} · {p.discount_percent}% off
+                  {p.name} — {money(p.fee)} · {validityLabel(p.validity_value, p.validity_unit)} · {planRatesLabel(p, data?.settings.category_rates)}
                 </option>
               ))}
             </Select>
@@ -464,8 +465,9 @@ export const Membership = ({ onChanged, role }: { onChanged: (message?: string) 
                 </span>
               </div>
               <p>
-                {money(p.fee)} · {validityLabel(p.validity_value, p.validity_unit)} · <b className="text-[var(--c-deep)]">{p.discount_percent}% off</b>
+                {money(p.fee)} · {validityLabel(p.validity_value, p.validity_unit)}
               </p>
+              <p className="font-semibold text-[var(--c-deep)]">{planRatesLabel(p, data.settings.category_rates)}</p>
               <p className="text-[11.5px]">
                 {p.min_bill > 0 ? `Min bill ₹${amount(p.min_bill)}` : "No minimum bill"} · {p.max_discount > 0 ? `Max ₹${amount(p.max_discount)}` : "No maximum"}
               </p>
@@ -744,7 +746,7 @@ const PlanModal = ({
         <Field label="Membership Validity">
           <ValidityFields value={validity} unit={unit} onValue={setValidity} onUnit={setUnit} />
         </Field>
-        <Field label="Discount Percentage (%)">
+        <Field label="Discount Percentage (%)" hint="For categories without their own rate in Settings → Membership">
           <TextInput type="number" min={0} max={100} value={percent} onChange={(e) => setPercent(e.target.value)} placeholder="0" />
         </Field>
         <Field label="Minimum Bill Amount (₹)" hint="Blank = no minimum">
@@ -822,7 +824,7 @@ const EditMemberModal = ({
               .filter((p) => p.active || p.id === member.plan_id)
               .map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} — {p.discount_percent}% off
+                  {p.name}
                 </option>
               ))}
           </Select>
@@ -916,8 +918,33 @@ const MembershipSettingsForm = ({
 
       <Card className="p-5">
         <SectionTitle>Discount</SectionTitle>
-        <p className="mb-3 text-[11.5px] text-gray-500">Percentage, minimum, maximum and categories fill into each new plan. Each plan&rsquo;s own values are what bills use.</p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <p className="mb-3 text-[11.5px] text-gray-500">The category rates apply to every plan. Discount %, minimum, maximum and eligible categories below only fill into each new plan; each plan&rsquo;s own values are what bills use.</p>
+        <Field label="Member Discount by Category (%)" hint="Each item gets its category's rate. Blank = the plan's Discount %.">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            {categories.map((c) => (
+              <label key={c} className="flex items-center gap-2 rounded-lg border border-[#e5e7eb] px-3 py-2 text-[13px] font-medium text-gray-800">
+                <span className="min-w-0 flex-1 truncate">{c}</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  aria-label={`${c} member discount %`}
+                  value={s.category_rates[c] ?? ""}
+                  placeholder="—"
+                  onChange={(e) => {
+                    const rates = { ...s.category_rates };
+                    if (e.target.value === "") delete rates[c];
+                    else rates[c] = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+                    setS({ ...s, category_rates: rates });
+                  }}
+                  className="h-8 w-16 rounded-md border border-[#d8dde3] px-2 text-right text-[13px] outline-none focus:border-[var(--c-primary)]"
+                />
+                <span className="text-gray-400">%</span>
+              </label>
+            ))}
+          </div>
+        </Field>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field label="Discount %">
             <TextInput {...num("default_percent")} max={100} />
           </Field>
