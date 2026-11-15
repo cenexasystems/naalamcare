@@ -287,6 +287,15 @@ export const memberRate = (
  * membership actually gives a discount on these items (minimum bill met, eligible items). Then the
  * bill skips offers, free gifts, automatic and bill-offer discounts; otherwise it's priced as usual.
  */
+/** Does the membership cover this category? (in the plan's eligible categories, with a rate above 0) */
+export const memberCovers = (
+  plan: Pick<MembershipPlan, "discount_percent" | "categories">,
+  rates: Record<string, number> | undefined,
+  category: string,
+): boolean =>
+  (!plan.categories.length || plan.categories.some((c) => c.toLowerCase() === category.toLowerCase())) &&
+  memberRate(plan, rates, category) > 0;
+
 export const memberOnlyApplies = (
   plan: Pick<MembershipPlan, "discount_percent" | "min_bill" | "max_discount" | "categories">,
   s: Pick<MembershipSettings, "members_only" | "category_rates">,

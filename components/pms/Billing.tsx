@@ -29,7 +29,7 @@ import { Button, Card, Pill, ScheduleBadge, ScreenHeading, Select } from "./ui";
 import { CustomerModal, type CustomerPayload } from "./CustomerModal";
 import { act, useMode } from "./mode-context";
 import { mutateAll, useBills, useCustomers, useMemberships, useSettings } from "./data";
-import { calcMemberDiscount, memberForBill, memberOnlyApplies, membershipOn } from "@/lib/membership";
+import { calcMemberDiscount, memberCovers, memberForBill, memberOnlyApplies, membershipOn } from "@/lib/membership";
 import { MemberBillPanel } from "./Membership";
 import { ReturnModal } from "./Payments";
 
@@ -385,20 +385,25 @@ export const Billing = ({
   // by line; not on lines an offer discounted unless it allows it), then bill offers (only while
   // automatic discounts are off), then the counter's manual discount.
   const autoConfig = settings?.mode_settings.auto_discounts;
-  const auto = useMemo(
-    () =>
-      autoConfig
+  /** On a member bill: the categories that get the member rate instead of the automatic discount ("|"-joined) */
+  const memberCovered =
+    memberOnly && memberInfo.plan && autoConfig
+      ? autoConfig.categories.map((c) => c.name).filter((c) => memberCovers(memberInfo.plan!, memberData?.settings.category_rates, c)).join("|")
+      : "";
+  // Not memoised: cheap, and it depends on the membership looked up this render.
+  const auto = autoConfig
         ? calcAutoDiscounts(
-            memberOnly ? { ...autoConfig, enabled: false } : autoConfig,
+            autoConfig,
             charged.map((c) => ({
               product_type: c.product_type,
               amount: round2(c.per_unit_price * c.qty - c.promo),
-              no_discount: Boolean(c.offer && !c.offer.stack_auto),
+              // Member bill: items the membership covers get the member rate instead
+              no_discount:
+                Boolean(c.offer && !c.offer.stack_auto) ||
+                Boolean(memberCovered && memberCovered.split("|").includes(categoryFor(autoConfig, c.product_type))),
             })),
           )
-        : null,
-    [autoConfig, charged, memberOnly],
-  );
+        : null;
   const autoTotal = auto?.total ?? 0;
   const afterType = round2(totals.grandTotal - promoTotal - autoTotal);
   const billOffer = calcBillOffer(autoConfig?.enabled || memberOnly ? [] : (settings?.mode_settings.bill_offers ?? []), afterType);
@@ -422,11 +427,8 @@ export const Billing = ({
   /** Manual discount switched off while an automatic discount applies (Settings) */
   const manualBlocked = autoTotal > 0 && autoConfig?.allow_manual === false;
   /** The next bigger slab and how much more the bill needs to reach it */
-  const nextSlab = useMemo(() => {
-    if (memberOnly || !autoConfig?.enabled || !auto || !lines.length) return null;
-    const up = autoConfig.slabs.find((s) => s.enabled && s.min > auto.subtotal);
-    return up ? { slab: up, shortBy: round2(up.min - auto.subtotal) } : null;
-  }, [autoConfig, auto, lines.length]);
+  const nextUp = !memberOnly && autoConfig?.enabled && auto && lines.length ? autoConfig.slabs.find((s) => s.enabled && s.min > auto.subtotal) : undefined;
+  const nextSlab = nextUp && auto ? { slab: nextUp, shortBy: round2(nextUp.min - auto.subtotal) } : null;
 
   // Tell the counter when an offer unlocks, or when its reward is out of stock (compared with the
   // previous render's offers, so each change is announced once).
@@ -1166,9 +1168,10 @@ export const Billing = ({
                 </span>
               )}
             </p>
-            {memberOnly ? (
-              <p className="text-[11.5px] text-gray-500">Member bill — the membership discount applies instead of offers and automatic discounts.</p>
-            ) : !autoConfig?.enabled ? (
+            {memberOnly && (
+              <p className="mb-1 text-[11.5px] text-gray-500">Member bill — member items get the membership discount; other items keep this discount. No offers.</p>
+            )}
+            {!autoConfig?.enabled ? (
               <p className="text-[11.5px] text-gray-500">Switched off for this dashboard (Settings → Automatic Discounts).</p>
             ) : !lines.length ? (
               <p className="text-[11.5px] text-gray-500">Applies as soon as items are added.</p>

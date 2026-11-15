@@ -20,6 +20,7 @@ import {
   MEMBER_METHODS,
   calcMemberDiscount,
   canRenew,
+  memberCovers,
   memberOnlyApplies,
   memberStatus,
   membershipOn,
@@ -1548,12 +1549,16 @@ export async function submitBill(
       // discount, line by line on the subtotal before it — not on lines an offer discounted unless
       // that offer allows it; 3) bill offers, only while automatic discounts are off; 4) the
       // counter's manual discount, within its cap.
+      // On a members-only bill, items the membership covers get the member rate instead of the
+      // automatic discount; items it doesn't cover keep their automatic discount.
       const auto = calcAutoDiscounts(
-        memberOnly ? { ...autoConfig, enabled: false } : autoConfig,
+        autoConfig,
         priced.map((p) => ({
           product_type: p.med.productType,
           amount: round2(p.perUnit * p.qty - p.promo),
-          no_discount: Boolean(p.offer && !p.offer.stack_auto),
+          no_discount:
+            Boolean(p.offer && !p.offer.stack_auto) ||
+            Boolean(memberOnly && memberPlan && memberCovers(memberPlan, memberSettings?.category_rates, categoryFor(autoConfig, p.med.productType))),
         })),
       );
       const afterPromo = round2(totals.grandTotal - promoTotal);
