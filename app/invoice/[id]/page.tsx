@@ -38,11 +38,14 @@ const mfrLabel = (item: BillItem): string => {
 
 /**
  * Disc % on a line: the automatic category discount it was billed at (saved on the bill, so later
- * settings changes never alter it). Bills without one show the total saving against MRP instead.
+ * settings changes never alter it), or the membership rate it got (member discount ÷ Rate, so 22%
+ * shows as 22.00%). Bills without either show the total saving against MRP instead.
  */
 const discPercent = (item: BillItem, net: number): number =>
   item.auto_percent > 0
     ? item.auto_percent
+    : item.member_discount > 0 && item.line_amount - item.promo_discount > 0
+      ? (item.member_discount / (item.line_amount - item.promo_discount)) * 100
     : item.line_mrp > 0
       ? Math.max(0, ((item.line_mrp - net) / item.line_mrp) * 100)
       : 0;
