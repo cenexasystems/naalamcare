@@ -27,10 +27,15 @@ export const parseNameList = (raw: unknown, defaults: string[]): string[] => {
 export const parseProductTypes = (raw: unknown): string[] => parseNameList(raw, DEFAULT_PRODUCT_TYPES);
 export const parsePurchaseUnits = (raw: unknown): string[] => parseNameList(raw, DEFAULT_PURCHASE_UNITS);
 
-/** Product types always bought and sold as single pieces (the General item behaviour). */
-const PIECE_PRODUCT_TYPES = ["general", "liquid", "injection", "bottle", "cartridge"];
-export const isPieceProductType = (productType?: string): boolean =>
-  PIECE_PRODUCT_TYPES.includes((productType || "").trim().toLowerCase());
+/**
+ * Product types bought and sold as single pieces (the General item behaviour): every type — including
+ * ones added in Settings — except tablet types (any name with "tablet", e.g. "Generic Tablet") and
+ * Box, which keep strips / boxes. A product with no type keeps its pack size.
+ */
+export const isPieceProductType = (productType?: string): boolean => {
+  const type = (productType || "").trim().toLowerCase();
+  return Boolean(type) && !type.includes("tablet") && type !== "box";
+};
 
 /**
  * Single-item products: one piece per pack, no boxes, so quantity = stock. Returns the pack type to
