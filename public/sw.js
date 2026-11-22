@@ -1,9 +1,11 @@
-const CACHE_NAME = 'nalam-care-medicals-v2';
+const CACHE_NAME = 'nalam-care-medicals-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/manifest.json',
   '/logo.png',
   '/logos/nalam-care-medicals-logo.png',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
   '/pos/admin/secure/control-panel/nalam-care-medicals'
 ];
 

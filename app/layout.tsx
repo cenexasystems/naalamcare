@@ -29,7 +29,7 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: "/icon.png",
-    apple: "/logo.png",
+    apple: "/icons/apple-touch-icon.png",
   },
 };
 
@@ -49,7 +49,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="Nalam Care Medicals" />
-        <link rel="apple-touch-icon" href="/logo.png" />
+        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
       </head>
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         {children}
